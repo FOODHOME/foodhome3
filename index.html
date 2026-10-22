@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>푸드홈(FOODHOME) - 보쌈무김치·김칫속 전문 제조업체</title>
+    <meta name="description" content="대한민국 대표 보쌈무김치, 무김치, 김칫속 수제 제조 전문 기업 푸드홈(FOODHOME) 공식 웹사이트 및 실시간 관리자 대시보드 시스템." />
+    <meta name="keywords" content="푸드홈, FOODHOME, 보쌈무김치, 무김치, 김칫속, 보쌈속, 업소용김치, 족발집무김치, 보쌈식자재, 안심김치제조" />
+    
+    <!-- OpenGraph Tags -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="푸드홈(FOODHOME) - 보쌈무김치·김칫속 전문 제조업체" />
+    <meta property="og:description" content="30년 비법 황금양념과 아삭한 식감의 보쌈무김치, 프리미엄 김칫속 제조 전문. 전국 외식업소 및 프랜차이즈 무료 샘플 배송." />
+    <meta property="og:site_name" content="푸드홈(FOODHOME)" />
+    <meta property="og:image" content="https://images.unsplash.com/photo-1583032015879-67990c74900a?auto=format&fit=crop&w=1200&q=80" />
+    
+    <!-- Twitter Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="푸드홈(FOODHOME) - 보쌈무김치·김칫속 전문 제조업체" />
+    <meta name="twitter:description" content="30년 비법 황금양념과 아삭한 식감의 보쌈무김치, 프리미엄 김칫속 제조 전문. 전국 외식업소 및 프랜차이즈 무료 샘플 배송." />
+    <meta name="twitter:image" content="https://images.unsplash.com/photo-1583032015879-67990c74900a?auto=format&fit=crop&w=1200&q=80" />
+
+    <!-- Favicon & Fonts -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥬</text></svg>" />
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+
+    <!-- Structured Data (Schema.org) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FoodEstablishment",
+      "name": "푸드홈(FOODHOME)",
+      "description": "보쌈무김치, 무김치, 김칫속 전문 식품제조업체",
+      "image": "https://images.unsplash.com/photo-1583032015879-67990c74900a?auto=format&fit=crop&w=1200&q=80",
+      "telephone": "1588-7241",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "충청북도 진천군 덕산읍 신척산단로 128 푸드홈 제조센터",
+        "addressCountry": "KR"
+      },
+      "servesCuisine": "Korean Kimchi Manufacturing"
+    }
+    </script>
+  </head>
+  <body class="bg-white text-slate-800 antialiased selection:bg-[#872D35] selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // 개발용 소스 index.html을 직접 브라우저(file://)나 정적 호스팅에서 열었을 때 안내
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        if (root && root.children.length === 0) {
+          var guide = document.createElement('div');
+          guide.id = 'open-guide-modal';
+          guide.style.cssText = 'position:fixed;inset:0;background:#f8fafc;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#1e293b;';
+          guide.innerHTML = '<div style="background:#fff;border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,0.08);max-width:540px;width:100%;padding:32px;border:1px solid #e2e8f0;text-align:center;">' +
+            '<div style="width:58px;height:58px;background:#eff6ff;color:#1e40af;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:28px;">🥬</div>' +
+            '<h2 style="font-size:19px;font-weight:800;margin:0 0 10px;color:#0f172a;">푸드홈(FOODHOME) 웹사이트 안내</h2>' +
+            '<p style="font-size:13.5px;line-height:1.6;color:#64748b;margin:0 0 20px;">' +
+            '현재 열려 있는 파일은 개발용 소스 코드 파일(<code>/index.html</code>)입니다.<br>' +
+            '더블 클릭으로 바로 실행되는 <b>완성본 파일은 <code>dist/index.html</code></b> 입니다!' +
+            '</p>' +
+            '<div style="background:#f1f5f9;border-radius:12px;padding:16px;text-align:left;font-size:12.5px;line-height:1.6;color:#334155;margin-bottom:24px;">' +
+            '<b>💡 깃허브(GitHub Pages) 배포 방법</b><br>' +
+            '• <b>방법 1 (가장 간편)</b>: 깃허브 저장소 <b>Settings > Pages</b>에서 Source를 <b>[Deploy from a branch]</b>로 두고 폴더를 <b><code>/docs</code></b> 로 선택하시면 바로 배포됩니다!<br>' +
+            '• <b>방법 2</b>: <code>dist/index.html</code> 파일을 더블클릭하여 내 컴퓨터에서 바로 확인하실 수 있습니다.' +
+            '</div>' +
+            '<a href="./dist/index.html" style="display:inline-block;background:#1e40af;color:#fff;font-weight:700;font-size:14px;padding:13px 26px;border-radius:12px;text-decoration:none;box-shadow:0 4px 12px rgba(30,64,175,0.25);">▶ dist/index.html 바로 열기</a>' +
+            '</div>';
+          document.body.appendChild(guide);
+        }
+      }, 1200);
+    </script>
+  </body>
+</html>
+

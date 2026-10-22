@@ -1,0 +1,6 @@
+{
+  "name": "푸드홈(FOODHOME) - 보쌈무김치·김칫속 전문 제조업체",
+  "description": "대한민국 대표 보쌈무김치, 무김치, 김칫속 수제 제조 전문 기업 푸드홈(FOODHOME) 공식 웹사이트 및 실시간 관리자 대시보드 시스템.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

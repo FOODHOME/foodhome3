@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <title>푸드홈(FOODHOME) - 페이지 이동 중</title>
+    <script>
+      // GitHub Pages SPA redirection
+      var pathSegmentsToKeep = 1;
+      var l = window.location;
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?/' +
+        l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
+        (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+        l.hash
+      );
+    </script>
+  </head>
+  <body>
+    <p>페이지를 불러오는 중입니다. 잠시만 기다려 주세요...</p>
+    <script>
+      // Fallback redirect
+      setTimeout(function() {
+        window.location.href = './';
+      }, 1000);
+    </script>
+  </body>
+</html>
