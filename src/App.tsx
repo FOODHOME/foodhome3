@@ -47,29 +47,47 @@ const MainContent: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 일반 방문자 마우스 우클릭 방지 (관리자 모드 열림 상태이거나 로그인 상태일 때는 우클릭 허용)
+  // 마우스 우클릭 및 이미지 불법 복제/다운로드 방지 기능
   React.useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => {
-      // 관리자 모드 모달이 열려있거나 관리자 로그인 상태인 경우 우클릭 허용
-      if (isAdminOpen || isAdminLoggedIn) {
-        return;
-      }
-
-      // 관리자 모달 또는 관리자 관련 내부 엘리먼트 클릭인지 확인
       const target = e.target as HTMLElement | null;
-      if (target && target.closest('[data-admin-area="true"]')) {
-        return;
+
+      // 관리자 대시보드 모달이 현재 열려있고([data-admin-area="true"]), 텍스트 입력창(input/textarea)인 경우에만 편의를 위해 우클릭(복사/붙여넣기) 허용
+      if (isAdminOpen && target) {
+        const adminArea = target.closest('[data-admin-area="true"]');
+        const isInputElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || (target as HTMLElement).isContentEditable;
+        if (adminArea && isInputElement) {
+          return;
+        }
       }
 
-      // 일반 방문자 화면에서는 브라우저 기본 우클릭 메뉴 차단 (이미지 저장 방지)
+      // 홈페이지 전체 화면, 모든 이미지, 모든 상세 페이지에서 우클릭 및 컨텍스트 메뉴 차단
       e.preventDefault();
+      e.stopPropagation();
+      return false;
     };
 
-    document.addEventListener('contextmenu', handleContextMenu);
-    return () => {
-      document.removeEventListener('contextmenu', handleContextMenu);
+    const handleDragStart = (e: DragEvent) => {
+      const target = e.target as HTMLElement | null;
+      // 이미지 드래그하여 새 탭이나 바탕화면으로 저장하는 동작 차단
+      if (target && (target.tagName === 'IMG' || target.closest('img'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
     };
-  }, [isAdminOpen, isAdminLoggedIn]);
+
+    // capture: true로 등록하여 모든 하위 엘리먼트보다 먼저 이벤트를 가로채 차단
+    document.addEventListener('contextmenu', handleContextMenu, { capture: true });
+    window.addEventListener('contextmenu', handleContextMenu, { capture: true });
+    document.addEventListener('dragstart', handleDragStart, { capture: true });
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu, { capture: true });
+      window.removeEventListener('contextmenu', handleContextMenu, { capture: true });
+      document.removeEventListener('dragstart', handleDragStart, { capture: true });
+    };
+  }, [isAdminOpen]);
 
   // Dynamically render main sections based on admin saved order and visibility
   const mainSectionsList = React.useMemo(() => {

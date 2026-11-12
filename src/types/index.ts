@@ -44,18 +44,37 @@ export interface ProductCategoryItem {
   visible: boolean;
 }
 
+export interface ProductFeatureCard {
+  id: string;
+  title: string;
+  desc: string;
+  icon?: string;
+  badge?: string;
+  bg?: string;
+  textColor?: string;
+  visible?: boolean;
+}
+
 export type SectionType = 
   | 'heading'        // 1. 제목
   | 'text'           // 2. 일반 텍스트
   | 'image'          // 3. 이미지
   | 'image_text'     // 4. 이미지 + 텍스트
-  | 'multi_image'    // 5. 여러 개의 이미지
-  | 'info_list'      // 6. 정보 목록
-  | 'feature_cards'  // 7. 특징 소개 카드
-  | 'button_cta'     // 8. 버튼 / 안내 배너
-  | 'divider'        // 9. 구분선
-  | 'signature'      // 10. 대표이사 서명 / 직책 / 이름
-  | 'spacer';        // 11. 여백
+  | 'text_image'     // 5. 텍스트 + 이미지
+  | 'feature_cards'  // 6. 특징 카드
+  | 'icon_cards'     // 7. 아이콘 카드
+  | 'button_cta'     // 8. 버튼 / CTA
+  | 'gallery'        // 9. 이미지 갤러리
+  | 'banner'         // 10. 배너
+  | 'divider'        // 11. 구분선
+  | 'faq'            // 12. FAQ
+  | 'video'          // 13. 동영상
+  | 'product_grid'   // 14. 제품 목록
+  | 'inquiry_cta'    // 15. 문의 유도 영역
+  | 'info_list'      // 16. 자유 콘텐츠 / 스펙 목록
+  | 'multi_image'    // 다중 이미지
+  | 'signature'      // 대표이사 서명 / 직책
+  | 'spacer';        // 여백
 
 export interface CustomSectionItem {
   id: string;
@@ -74,13 +93,17 @@ export interface CustomSectionItem {
   spacerHeight?: number | string;
   layout?: '1-col' | '2-col' | '3-col' | '4-col';
   infoItems?: { label: string; value: string }[];
-  cardItems?: { title: string; desc: string; icon?: string; badge?: string; imageUrl?: string }[];
+  cardItems?: { title: string; desc: string; icon?: string; badge?: string; imageUrl?: string; bg?: string; textColor?: string }[];
   buttonText?: string;
   buttonLink?: string;
   buttonAction?: string;
   secondaryButtonText?: string;
   secondaryButtonLink?: string;
   secondaryButtonAction?: string;
+  videoUrl?: string;
+  faqItems?: { question: string; answer: string }[];
+  bgColor?: string;
+  textColor?: string;
   visible: boolean;
   order: number;
 }
@@ -335,6 +358,7 @@ export interface ProductItem {
   buttonText?: string;
   buttonAction?: string;
   categories?: string[];
+  featureCards?: ProductFeatureCard[];
   customSections?: CustomSectionItem[];
 }
 

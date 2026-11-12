@@ -522,6 +522,69 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
             return <div key={sec.id} style={{ height: heightVal }} aria-hidden="true" />;
           }
 
+          // 12. Video Section
+          case 'video':
+            return (
+              <div key={sec.id} className="bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm space-y-4">
+                {(sec.title || sec.subtitle) && (
+                  <div>
+                    {sec.badge && (
+                      <span className="text-xs font-bold text-[#872D35] uppercase tracking-wider block mb-1">{sec.badge}</span>
+                    )}
+                    {sec.title && <h3 className="text-2xl font-black text-stone-900">{sec.title}</h3>}
+                    {sec.subtitle && <p className="text-xs sm:text-sm text-stone-600 mt-1">{sec.subtitle}</p>}
+                  </div>
+                )}
+                <div className="relative aspect-16/9 rounded-2xl overflow-hidden bg-stone-900 shadow-inner">
+                  {sec.videoUrl ? (
+                    <iframe
+                      src={sec.videoUrl}
+                      title={sec.title || 'Video'}
+                      className="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-stone-400 text-xs font-bold">
+                      등록된 영상 URL이 없습니다.
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+
+          // 13. FAQ Accordion Section
+          case 'faq':
+            return (
+              <div key={sec.id} className="bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm space-y-6">
+                {(sec.title || sec.subtitle) && (
+                  <div>
+                    {sec.badge && (
+                      <span className="text-xs font-bold text-[#872D35] uppercase tracking-wider block mb-1">{sec.badge}</span>
+                    )}
+                    {sec.title && <h3 className="text-2xl font-black text-stone-900">{sec.title}</h3>}
+                    {sec.subtitle && <p className="text-xs sm:text-sm text-stone-600 mt-1">{sec.subtitle}</p>}
+                  </div>
+                )}
+                <div className="space-y-3">
+                  {(sec.faqItems || [
+                    { question: '최소 주문 수량(MOQ)은 얼마인가요?', answer: '기본 1박스부터 전국 택배 출고가 가능합니다.' },
+                    { question: '샘플은 무료로 제공되나요?', answer: '외식업 사업자등록증 확인 시 택배비까지 전액 무료로 샘플을 발송해 드립니다.' }
+                  ]).map((item, qIdx) => (
+                    <div key={qIdx} className="p-4 rounded-2xl bg-stone-50 border border-stone-200">
+                      <div className="font-extrabold text-stone-900 text-sm flex items-center gap-2 mb-1">
+                        <span className="text-[#872D35] font-black">Q.</span>
+                        <span>{item.question}</span>
+                      </div>
+                      <p className="text-xs text-stone-600 pl-5 leading-relaxed whitespace-pre-line">
+                        {item.answer}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+
           default:
             return null;
         }

@@ -163,11 +163,16 @@ export const ProductDetailPage: React.FC = () => {
                 <img
                   src={activeImage || product.imageUrl}
                   alt={product.name}
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  draggable={false}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 select-none pointer-events-auto"
                 />
                 
                 {/* Floating Badges */}
-                <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2">
+                <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2 pointer-events-none">
                   <span className="px-3 py-1 rounded-full bg-[#872D35] text-white text-xs font-black shadow-md">
                     {product.tag || 'B2B 대표'}
                   </span>
@@ -184,7 +189,7 @@ export const ProductDetailPage: React.FC = () => {
                 </div>
 
                 {/* Weight Chip */}
-                <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-xs text-white text-xs font-extrabold tracking-wide shadow-md">
+                <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-xs text-white text-xs font-extrabold tracking-wide shadow-md pointer-events-none">
                   규격: {product.weight}
                 </div>
               </div>
@@ -202,35 +207,83 @@ export const ProductDetailPage: React.FC = () => {
                           : 'border-stone-200 hover:border-stone-400 opacity-70 hover:opacity-100'
                       }`}
                     >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
+                      <img 
+                        src={img} 
+                        alt="" 
+                        draggable={false}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        className="w-full h-full object-cover select-none" 
+                      />
                     </button>
                   ))}
                 </div>
               )}
 
-              {/* 4 Feature Badges Under Image */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2">
-                <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC] text-center">
-                  <Sparkles className="w-4 h-4 text-[#872D35] mx-auto mb-1" />
-                  <span className="text-[11px] font-black text-stone-800 block">특허 수분제어</span>
-                  <span className="text-[10px] text-stone-500">물 생김 제로</span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC] text-center">
-                  <CheckCircle2 className="w-4 h-4 text-[#872D35] mx-auto mb-1" />
-                  <span className="text-[11px] font-black text-stone-800 block">100% 국산 농산물</span>
-                  <span className="text-[10px] text-stone-500">산지 계약재배</span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC] text-center">
-                  <ShieldCheck className="w-4 h-4 text-[#872D35] mx-auto mb-1" />
-                  <span className="text-[11px] font-black text-stone-800 block">위생 안심 공정</span>
-                  <span className="text-[10px] text-stone-500">HACCP 스마트팩토리</span>
-                </div>
-                <div className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC] text-center">
-                  <Truck className="w-4 h-4 text-[#872D35] mx-auto mb-1" />
-                  <span className="text-[11px] font-black text-stone-800 block">전국 콜드체인</span>
-                  <span className="text-[10px] text-stone-500">0~5℃ 익일 직배송</span>
-                </div>
-              </div>
+              {/* Dynamic Feature Badges Under Image */}
+              {(() => {
+                const cards = (product.featureCards && product.featureCards.length > 0)
+                  ? product.featureCards.filter(c => c.visible !== false)
+                  : [
+                      { id: 'pfc-1', icon: 'Sparkles', title: '특허 수분제어', desc: '물 생김 제로', visible: true },
+                      { id: 'pfc-2', icon: 'CheckCircle2', title: '100% 국산 농산물', desc: '산지 계약재배', visible: true },
+                      { id: 'pfc-3', icon: 'ShieldCheck', title: '위생 안심 공정', desc: 'HACCP 스마트팩토리', visible: true },
+                      { id: 'pfc-4', icon: 'Truck', title: '전국 콜드체인', desc: '0~5℃ 익일 직배송', visible: true },
+                    ];
+
+                if (cards.length === 0) return null;
+
+                const gridColClass = cards.length === 2 
+                  ? 'grid-cols-2' 
+                  : cards.length === 3 
+                  ? 'grid-cols-3' 
+                  : 'grid-cols-2 sm:grid-cols-4';
+
+                const ICON_MAPPING: Record<string, any> = {
+                  Sparkles,
+                  CheckCircle2,
+                  ShieldCheck,
+                  Truck,
+                  Award,
+                  Flame,
+                  Clock,
+                  Thermometer,
+                  Package,
+                  Store,
+                  Phone,
+                  Info,
+                  Layers,
+                  Check
+                };
+
+                return (
+                  <div 
+                    className={`grid ${gridColClass} gap-2.5 pt-2`}
+                    data-editable-id="product_feature_cards"
+                    data-product-id={product.id}
+                  >
+                    {cards.map((card, cIdx) => {
+                      const IconComp = (card.icon && ICON_MAPPING[card.icon]) || Sparkles;
+                      return (
+                        <div 
+                          key={card.id || cIdx}
+                          className="p-3 rounded-xl border border-[#E8E2DC] text-center transition-all"
+                          style={{ 
+                            backgroundColor: card.bg || '#FAF8F5',
+                            color: card.textColor || '#2A2020'
+                          }}
+                        >
+                          <IconComp className="w-4 h-4 text-[#872D35] mx-auto mb-1" />
+                          <span className="text-[11px] font-black text-stone-800 block truncate">{card.title}</span>
+                          <span className="text-[10px] text-stone-500 block truncate">{card.desc}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
             </div>
 

@@ -125,7 +125,12 @@ export const ProductSection: React.FC = () => {
                   <img 
                     src={product.imageUrl} 
                     alt={product.name}
-                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+                    draggable={false}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 select-none"
                     loading="lazy"
                   />
                   

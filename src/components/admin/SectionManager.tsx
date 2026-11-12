@@ -36,7 +36,7 @@ interface SectionManagerProps {
   onSave?: () => void;
 }
 
-const SECTION_TYPE_LABELS: Record<SectionType, { label: string; desc: string; icon: any }> = {
+const SECTION_TYPE_LABELS: Record<string, { label: string; desc: string; icon: any }> = {
   heading: { label: '제목 블록', desc: '대제목 및 소제목 헤더', icon: Type },
   text: { label: '텍스트 설명 블록', desc: '장문 설명 및 텍스트 안내', icon: AlignLeft },
   image: { label: '단일 이미지 블록', desc: '와이드 단독 이미지 (크기 조절)', icon: ImageIcon },

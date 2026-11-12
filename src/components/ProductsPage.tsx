@@ -137,7 +137,12 @@ export const ProductsPage: React.FC = () => {
                 <img
                   src={product.imageUrl}
                   alt={product.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  draggable={false}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 select-none"
                 />
                 <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
                   <span className="px-2.5 py-1 rounded-full bg-[#872D35] text-white text-[11px] font-black shadow-xs">

@@ -52,7 +52,12 @@ export const ProductDetailModal: React.FC = () => {
               <img 
                 src={product.imageUrl} 
                 alt={product.name} 
-                className="w-full h-full object-cover"
+                draggable={false}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                className="w-full h-full object-cover select-none"
               />
             </div>
             
