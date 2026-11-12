@@ -5,26 +5,46 @@ interface FoodhomeLogoProps {
   variant?: 'dark' | 'light';
   className?: string;
   height?: number;
+  width?: number;
+  placement?: 'header' | 'footer' | 'preview';
 }
 
 export const FoodhomeLogo: React.FC<FoodhomeLogoProps> = ({
   variant = 'dark',
   className = '',
-  height = 42
+  height,
+  width,
+  placement
 }) => {
   const { state } = useApp();
   const [imageError, setImageError] = useState(false);
   const logoSrc = state.content.logoUrl || '/assets/aistudio/image_c9ceb519.png';
 
+  // Determine width based on placement if not directly passed
+  const effectiveWidth = width || (
+    placement === 'header'
+      ? (state.content.headerLogoWidth || 160)
+      : placement === 'footer'
+        ? (state.content.footerLogoWidth || 140)
+        : undefined
+  );
+
+  // Default height fallback if neither height nor width is provided
+  const effectiveHeight = height || (!effectiveWidth ? (variant === 'light' ? 36 : 42) : undefined);
+
   // If the user's uploaded image loads, display it
   if (!imageError) {
     return (
-      <div className={`flex items-center gap-2 select-none ${className}`}>
+      <div className={`flex items-center gap-2 select-none bg-transparent ${className}`}>
         <img
           src={logoSrc}
           alt="FOOD HOME 푸드홈"
-          style={{ height: `${height}px` }}
-          className={`object-contain max-h-[52px] ${variant === 'light' ? 'brightness-110 drop-shadow-sm' : ''}`}
+          style={{
+            width: effectiveWidth ? `${effectiveWidth}px` : undefined,
+            height: effectiveHeight ? `${effectiveHeight}px` : 'auto',
+            maxWidth: '100%'
+          }}
+          className={`object-contain bg-transparent transition-all duration-150 ${variant === 'light' ? 'brightness-110 drop-shadow-sm' : ''}`}
           onError={() => setImageError(true)}
         />
       </div>
@@ -32,12 +52,14 @@ export const FoodhomeLogo: React.FC<FoodhomeLogoProps> = ({
   }
 
   // Graceful vector fallback matching Image 5 (House outline + FOOD HOME in slate/steel-blue)
+  const vectorDim = (effectiveHeight || (variant === 'light' ? 36 : 42)) * 0.9;
+
   return (
     <div className={`flex items-center gap-2.5 select-none ${className}`}>
       <div className="flex items-center justify-center">
         <svg
-          width={height * 0.9}
-          height={height * 0.9}
+          width={vectorDim}
+          height={vectorDim}
           viewBox="0 0 48 48"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"

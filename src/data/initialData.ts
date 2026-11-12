@@ -6,6 +6,8 @@ export const initialData: AppState = {
     brandSubName: 'FOODHOME',
     tagline: '30년 전통 비법양념과 특허 수분제어로 빚어낸 명품 보쌈무김치',
     logoUrl: '', // Default SVG logo will be displayed, or custom logo uploaded by user
+    headerLogoWidth: 160,
+    footerLogoWidth: 140,
     
     // Navigation Menus (GNB) - Editable in Admin Dashboard
     navMenus: [

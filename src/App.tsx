@@ -47,6 +47,30 @@ const MainContent: React.FC = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // 일반 방문자 마우스 우클릭 방지 (관리자 모드 열림 상태이거나 로그인 상태일 때는 우클릭 허용)
+  React.useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      // 관리자 모드 모달이 열려있거나 관리자 로그인 상태인 경우 우클릭 허용
+      if (isAdminOpen || isAdminLoggedIn) {
+        return;
+      }
+
+      // 관리자 모달 또는 관리자 관련 내부 엘리먼트 클릭인지 확인
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest('[data-admin-area="true"]')) {
+        return;
+      }
+
+      // 일반 방문자 화면에서는 브라우저 기본 우클릭 메뉴 차단 (이미지 저장 방지)
+      e.preventDefault();
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, [isAdminOpen, isAdminLoggedIn]);
+
   // Dynamically render main sections based on admin saved order and visibility
   const mainSectionsList = React.useMemo(() => {
     if (state.content.mainSections && state.content.mainSections.length > 0) {

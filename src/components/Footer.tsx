@@ -31,7 +31,7 @@ export const Footer: React.FC = () => {
           
           {/* Brand Info */}
           <div className="lg:col-span-5 space-y-3">
-            <FoodhomeLogo variant="light" height={36} />
+            <FoodhomeLogo variant="light" placement="footer" />
 
             <p className="text-xs text-stone-400 leading-relaxed max-w-sm font-normal">
               {content.tagline}. 대한민국 대표 보쌈무김치, 무김치, 명품 김칫속(보쌈속) 수제 제조 전문 기업 푸드홈입니다.

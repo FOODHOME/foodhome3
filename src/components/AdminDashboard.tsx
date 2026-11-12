@@ -615,10 +615,11 @@ export const AdminDashboard: React.FC = () => {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200" data-admin-area="true">
       <div 
         className="bg-white rounded-2xl shadow-2xl w-full max-w-7xl h-[96vh] flex flex-col overflow-hidden border border-slate-200"
         onClick={(e) => e.stopPropagation()}
+        data-admin-area="true"
       >
         {/* Top Header */}
         <div className="bg-[#2A2020] text-white px-5 sm:px-6 py-3.5 flex items-center justify-between shrink-0 border-b border-[#3D2E2E]">
@@ -1304,13 +1305,13 @@ export const AdminDashboard: React.FC = () => {
                     <div className="p-4 rounded-xl border border-slate-200 bg-white flex flex-col items-center justify-center gap-2">
                       <span className="text-[10px] font-bold text-slate-400">상단 헤더 적용 미리보기 (밝은 배경)</span>
                       <div className="py-2 flex items-center justify-center min-h-[50px]">
-                        <FoodhomeLogo variant="dark" height={42} />
+                        <FoodhomeLogo variant="dark" placement="header" />
                       </div>
                     </div>
                     <div className="p-4 rounded-xl border border-stone-800 bg-[#221A1A] flex flex-col items-center justify-center gap-2">
                       <span className="text-[10px] font-bold text-stone-400">하단 푸터 적용 미리보기 (어두운 배경)</span>
                       <div className="py-2 flex items-center justify-center min-h-[50px]">
-                        <FoodhomeLogo variant="light" height={36} />
+                        <FoodhomeLogo variant="light" placement="footer" />
                       </div>
                     </div>
                   </div>

@@ -344,9 +344,9 @@ export const Header: React.FC = () => {
         <a 
           href="#"
           onClick={(e) => { e.preventDefault(); navigateTo('home'); }}
-          className="cursor-pointer group py-2"
+          className="cursor-pointer group py-2 flex items-center"
         >
-          <FoodhomeLogo variant="dark" height={44} />
+          <FoodhomeLogo variant="dark" placement="header" />
         </a>
 
         {/* Center: Horizontal Menus with Dropdown */}

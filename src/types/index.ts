@@ -163,6 +163,8 @@ export interface SiteContent {
   brandSubName: string;
   tagline: string;
   logoUrl?: string;
+  headerLogoWidth?: number; // 상단 헤더 로고 가로 크기(px), 기본 160
+  footerLogoWidth?: number; // 하단 푸터 로고 가로 크기(px), 기본 140
   
   // Navigation Menus (GNB)
   navMenus: NavMenuItem[];
