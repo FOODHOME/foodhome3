@@ -4,7 +4,7 @@ import { ProductItem, PostItem, B2BInquiry, NavMenuItem, NavSubmenuItem } from '
 import { initialData } from '../data/initialData';
 import { FoodhomeLogo } from './FoodhomeLogo';
 import { submitToFormspree } from '../utils/formspree';
-import { getSupabaseClient } from '../lib/supabase';
+import { getSupabaseClient, uploadImageToStorage } from '../lib/supabase';
 import { MainBannerManager } from './admin/MainBannerManager';
 import { QuoteInquiriesManager } from './admin/QuoteInquiriesManager';
 import { ContentManager } from './admin/ContentManager';
@@ -296,17 +296,20 @@ export const AdminDashboard: React.FC = () => {
   };
 
   // Logo Handlers
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
+    const res = await uploadImageToStorage(file, 'logos');
+    if (res.url) {
+      const dataUrl = res.url;
       setContentForm(prev => ({ ...prev, logoUrl: dataUrl }));
       updateContent({ logoUrl: dataUrl });
       showToast('공식 로고 이미지가 업로드되어 즉시 적용되었습니다.');
-    };
-    reader.readAsDataURL(file);
+    } else {
+      alert(res.error || '로고 업로드에 실패했습니다.');
+    }
   };
 
   const handleResetLogo = () => {
@@ -2220,7 +2223,7 @@ export const AdminDashboard: React.FC = () => {
               <div>
                 <label className="font-bold text-slate-700 block mb-1">이미지 URL</label>
                 <input
-                  type="url"
+                  type="text"
                   value={productForm.imageUrl}
                   onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200"

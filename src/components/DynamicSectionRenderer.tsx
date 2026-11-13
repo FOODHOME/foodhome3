@@ -149,10 +149,11 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
             else if (sec.imageSize === 'medium') sizeClass = 'max-w-2xl mx-auto';
             else if (sec.imageSize === 'large') sizeClass = 'max-w-4xl mx-auto';
 
+            const imgSrc = sec.imageUrl?.trim();
             return (
               <div key={sec.id} className={`${sizeClass} rounded-3xl overflow-hidden border border-stone-200 shadow-sm bg-white`}>
-                {sec.imageUrl && (
-                  <img src={sec.imageUrl} alt={sec.title || ''} className="w-full h-auto object-cover max-h-[580px]" />
+                {imgSrc && (
+                  <img src={imgSrc} alt={sec.title || ''} className="w-full h-auto object-cover max-h-[580px]" />
                 )}
                 {(sec.title || sec.content) && (
                   <div className="p-4 sm:p-5 bg-white border-t border-stone-100 text-center">
@@ -168,6 +169,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
           case 'image_text': {
             const isRight = sec.imagePosition === 'right';
             const isTop = sec.imagePosition === 'top';
+            const imgSrc = sec.imageUrl?.trim();
 
             const primaryBtn = getButtonStyling(sec.buttonText, sec.buttonLink, false);
             const secondaryBtn = getButtonStyling(sec.secondaryButtonText, sec.secondaryButtonLink, true);
@@ -175,9 +177,9 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
             if (isTop) {
               return (
                 <div key={sec.id} className="bg-white rounded-3xl overflow-hidden border border-stone-200 shadow-sm">
-                  {sec.imageUrl && (
+                  {imgSrc && (
                     <div className="h-72 sm:h-96 w-full overflow-hidden bg-stone-100">
-                      <img src={sec.imageUrl} alt={sec.title || ''} className="w-full h-full object-cover" />
+                      <img src={imgSrc} alt={sec.title || ''} className="w-full h-full object-cover" />
                     </div>
                   )}
                   <div className="p-6 sm:p-10 space-y-4">
@@ -236,10 +238,10 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
                   {/* Image Column */}
                   <div className={`lg:col-span-5 ${isRight ? 'lg:order-2' : 'lg:order-1'}`}>
-                    {sec.imageUrl ? (
+                    {imgSrc ? (
                       <div className="relative rounded-2xl overflow-hidden shadow-lg border border-stone-200 bg-stone-100">
                         <img
-                          src={sec.imageUrl}
+                          src={imgSrc}
                           alt={sec.title || ''}
                           className="w-full h-80 object-cover"
                         />
@@ -310,7 +312,8 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
           }
 
           // 5. Multiple Images (Gallery)
-          case 'multi_image':
+          case 'multi_image': {
+            const validImages = (sec.images || []).map((img) => img?.trim()).filter(Boolean) as string[];
             return (
               <div key={sec.id} className="bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm space-y-6">
                 {(sec.title || sec.subtitle) && (
@@ -322,15 +325,22 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                     {sec.subtitle && <p className="text-xs sm:text-sm text-stone-600 mt-1">{sec.subtitle}</p>}
                   </div>
                 )}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {(sec.images || []).map((img, iIdx) => (
-                    <div key={iIdx} className="rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 aspect-4/3">
-                      <img src={img} alt="" className="w-full h-full object-cover hover:scale-105 transition-transform" />
-                    </div>
-                  ))}
-                </div>
+                {validImages.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {validImages.map((img, iIdx) => (
+                      <div key={iIdx} className="rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 aspect-4/3">
+                        <img src={img} alt="" className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-48 rounded-2xl bg-stone-100 border border-stone-200 flex items-center justify-center text-stone-400 text-xs font-medium">
+                    등록된 이미지가 없습니다
+                  </div>
+                )}
               </div>
             );
+          }
 
           // 6. Info List (Key-Value specification table, e.g. Corporate Profile or Product Specs)
           case 'info_list':

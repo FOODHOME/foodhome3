@@ -26,7 +26,7 @@ export const ProductDetailModal: React.FC = () => {
 
   if (!selectedProductForDetail) return null;
 
-  const product = selectedProductForDetail;
+  const product = state.products.find(p => p.id === selectedProductForDetail.id) || selectedProductForDetail;
   const visibleBadges = getProductBadges(product).filter(b => b.visible && b.text?.trim());
   const visibleSpecs = getProductSpecItems(product).filter(s => s.visible && s.value?.trim());
 

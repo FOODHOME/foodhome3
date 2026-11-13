@@ -87,7 +87,7 @@ export const StorySection: React.FC<{ config?: MainSectionConfig }> = ({ config 
           <div className="lg:col-span-5 relative">
             <div className="relative rounded-xl overflow-hidden aspect-4/3 shadow-sm border border-[#E8E2DC]">
               <img
-                src="./images/banner_bossam.jpg"
+                src={cfg?.imageUrl?.trim() || "./images/banner_bossam.jpg"}
                 alt="푸드홈 김치 숙성 및 제조"
                 className="w-full h-full object-cover"
                 loading="lazy"

@@ -362,14 +362,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedFacilityMedia, setSelectedFacilityMedia] = useState<FacilityMediaItem | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Sync to localStorage
+  // Sync to localStorage (never delete/reset existing data on failure; alert user clearly if quota exceeded)
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to save to localStorage:', e);
+      const isQuota =
+        e?.name === 'QuotaExceededError' ||
+        e?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
+        e?.code === 22;
+      const errMsg = isQuota
+        ? '저장 공간(약 5MB)을 초과하여 마지막 변경사항이 브라우저에 저장되지 않았습니다. 이미지 크기를 줄이거나 불필요한 대용량 이미지를 정리해 주세요.'
+        : '브라우저 저장 중 오류가 발생하여 마지막 변경사항이 저장되지 않았습니다.';
+      setToastMessage(errMsg);
+      if (typeof window !== 'undefined') {
+        window.alert(errMsg);
+      }
     }
   }, [state]);
 
@@ -434,6 +445,78 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   ...(newContent.ceoSubtitle !== undefined ? { subtitle: newContent.ceoSubtitle } : {}),
                   ...(newContent.ceoGreeting !== undefined ? { content: newContent.ceoGreeting } : {}),
                   ...(newContent.ceoImageUrl !== undefined ? { imageUrl: newContent.ceoImageUrl } : {}),
+                };
+              }
+              return sec;
+            });
+          }
+        });
+        mergedContent.pageSections = nextPageSections;
+      }
+
+      const hasSystemUpdate =
+        newContent.systemSteps !== undefined ||
+        newContent.systemTitle !== undefined ||
+        newContent.systemDescription !== undefined;
+
+      if (hasSystemUpdate && (mergedContent.pageSections || prev.content.pageSections) && !newContent.pageSections) {
+        const basePageSections = mergedContent.pageSections || prev.content.pageSections || {};
+        const nextPageSections = { ...basePageSections };
+        ['about-system', 'system'].forEach((key) => {
+          const list = nextPageSections[key];
+          if (Array.isArray(list)) {
+            nextPageSections[key] = list.map((sec) => {
+              if (sec.id === 'sec-system-steps') {
+                return {
+                  ...sec,
+                  ...(newContent.systemTitle !== undefined ? { title: newContent.systemTitle } : {}),
+                  ...(newContent.systemDescription !== undefined ? { subtitle: newContent.systemDescription } : {}),
+                  ...(Array.isArray(newContent.systemSteps) && newContent.systemSteps.length > 0
+                    ? {
+                        cardItems: newContent.systemSteps.map((s) => ({
+                          title: `${s.step} ${s.title}`,
+                          desc: s.desc,
+                          imageUrl: s.img,
+                          icon: 'CheckCircle2'
+                        }))
+                      }
+                    : {})
+                };
+              }
+              return sec;
+            });
+          }
+        });
+        mergedContent.pageSections = nextPageSections;
+      }
+
+      const hasPermitsUpdate =
+        newContent.permitsList !== undefined ||
+        newContent.permitsTitle !== undefined ||
+        newContent.permitsDescription !== undefined;
+
+      if (hasPermitsUpdate && (mergedContent.pageSections || prev.content.pageSections) && !newContent.pageSections) {
+        const basePageSections = mergedContent.pageSections || prev.content.pageSections || {};
+        const nextPageSections = { ...basePageSections };
+        ['about-permits', 'permits'].forEach((key) => {
+          const list = nextPageSections[key];
+          if (Array.isArray(list)) {
+            nextPageSections[key] = list.map((sec) => {
+              if (sec.id === 'sec-permits-cards') {
+                return {
+                  ...sec,
+                  ...(newContent.permitsTitle !== undefined ? { title: newContent.permitsTitle } : {}),
+                  ...(newContent.permitsDescription !== undefined ? { subtitle: newContent.permitsDescription } : {}),
+                  ...(Array.isArray(newContent.permitsList) && newContent.permitsList.length > 0
+                    ? {
+                        cardItems: newContent.permitsList.map((p) => ({
+                          title: p.title,
+                          badge: p.status || p.number,
+                          desc: `${p.issuer} · ${p.desc}`,
+                          icon: 'ShieldCheck'
+                        }))
+                      }
+                    : {})
                 };
               }
               return sec;
@@ -648,16 +731,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updatePageSections = (pageId: string, sections: CustomSectionItem[]) => {
-    setState(prev => ({
-      ...prev,
-      content: {
-        ...prev.content,
-        pageSections: {
-          ...(prev.content.pageSections || {}),
-          [pageId]: sections
-        }
+    setState(prev => {
+      const nextSectionsMap: Record<string, CustomSectionItem[]> = {
+        ...(prev.content.pageSections || {}),
+        [pageId]: sections
+      };
+      // Keep 'about-<subId>' and '<subId>' in sync so admin editor and live page never diverge
+      if (pageId.startsWith('about-')) {
+        const plainId = pageId.slice('about-'.length);
+        if (plainId) nextSectionsMap[plainId] = sections;
+      } else if (['intro', 'system', 'permits', 'location', 'history'].includes(pageId)) {
+        nextSectionsMap[`about-${pageId}`] = sections;
       }
-    }));
+      return {
+        ...prev,
+        content: {
+          ...prev.content,
+          pageSections: nextSectionsMap
+        }
+      };
+    });
     showToast('페이지 섹션 구성 및 내용이 성공적으로 저장되었습니다.');
   };
 

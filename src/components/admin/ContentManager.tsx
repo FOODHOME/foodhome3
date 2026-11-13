@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { 
   ProductItem, 
@@ -21,7 +21,7 @@ import {
 } from '../../utils/productUtils';
 import { uploadImageToStorage } from '../../lib/supabase';
 import { SectionManager } from './SectionManager';
-import { getDefaultPageSections, getDefaultProductSections } from '../../data/defaultPageSections';
+import { getDefaultPageSections, getDefaultProductSections, resolveAboutSections } from '../../data/defaultPageSections';
 import { 
   Building, 
   Package, 
@@ -98,10 +98,25 @@ export const ContentManager: React.FC = () => {
   // Local form for general site content
   const [contentForm, setContentForm] = useState(state.content);
   const [isUploading, setIsUploading] = useState(false);
+  const prevStateContentRef = useRef(state.content);
 
-  // Sync content form when state changes
+  // Sync content form when state changes (without clobbering unsaved fields if only pageSections changed)
   useEffect(() => {
-    setContentForm(state.content);
+    const prev = prevStateContentRef.current;
+    if (prev !== state.content) {
+      const onlyPageSectionsChanged =
+        state.content.pageSections !== prev.pageSections &&
+        Object.keys({ ...prev, ...state.content }).every(
+          (key) => key === 'pageSections' || (prev as any)[key] === (state.content as any)[key]
+        );
+
+      if (onlyPageSectionsChanged) {
+        setContentForm(cur => ({ ...cur, pageSections: state.content.pageSections }));
+      } else {
+        setContentForm(state.content);
+      }
+      prevStateContentRef.current = state.content;
+    }
   }, [state.content]);
 
   // Ensure selected product is valid
@@ -119,7 +134,8 @@ export const ContentManager: React.FC = () => {
   };
 
   const handleSaveAllContent = () => {
-    updateContent(contentForm);
+    const { pageSections: _preserveSavedSections, ...restContentForm } = contentForm;
+    updateContent(restContentForm);
     if (contentForm.companySubpages) {
       updateCompanySubpages(contentForm.companySubpages);
     }
@@ -130,7 +146,9 @@ export const ContentManager: React.FC = () => {
     fieldOrCallback: keyof typeof contentForm | ((url: string) => void),
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    const file = e.target.files?.[0];
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
     if (!file) return;
 
     setIsUploading(true);
@@ -1082,15 +1100,17 @@ export const ContentManager: React.FC = () => {
               <SectionManager
                 title={`'${currentSubpage.menuLabel}' 본문 섹션 블록 관리`}
                 subtitle="페이지에 노출되는 이미지, 소개글, 특징 카드, 프로세스, CTA 안내 블록을 자유롭게 추가·수정·순서변경합니다."
-                sections={contentForm.pageSections?.[`about-${currentSubpage.id}`] || contentForm.pageSections?.[currentSubpage.id] || []}
+                sections={resolveAboutSections(contentForm.pageSections, currentSubpage.id)}
                 fallbackSections={getDefaultPageSections(`about-${currentSubpage.id}`, contentForm)}
                 onChange={(newSecs) => {
-                  const updatedSections = {
-                    ...(contentForm.pageSections || {}),
-                    [`about-${currentSubpage.id}`]: newSecs,
-                    [currentSubpage.id]: newSecs
-                  };
-                  handleFieldChange('pageSections', updatedSections);
+                  setContentForm(prev => ({
+                    ...prev,
+                    pageSections: {
+                      ...(prev.pageSections || {}),
+                      [`about-${currentSubpage.id}`]: newSecs,
+                      [currentSubpage.id]: newSecs
+                    }
+                  }));
                   updatePageSections(`about-${currentSubpage.id}`, newSecs);
                 }}
               />

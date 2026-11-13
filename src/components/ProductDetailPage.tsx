@@ -70,6 +70,12 @@ export const ProductDetailPage: React.FC = () => {
     }
   }, [product?.id]);
 
+  useEffect(() => {
+    if (product?.imageUrl) {
+      setActiveImage(product.imageUrl);
+    }
+  }, [product?.imageUrl]);
+
   if (!product) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center p-8 bg-stone-50">

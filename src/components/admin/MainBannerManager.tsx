@@ -103,7 +103,9 @@ export const MainBannerManager: React.FC = () => {
   };
 
   const handleImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>, isMobile = false) => {
-    const file = e.target.files?.[0];
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
     if (!file) return;
 
     setIsUploading(true);

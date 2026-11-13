@@ -16,7 +16,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { DynamicSectionRenderer } from './DynamicSectionRenderer';
-import { getDefaultPageSections } from '../data/defaultPageSections';
+import { getDefaultPageSections, resolveAboutSections } from '../data/defaultPageSections';
 
 interface CompanyAboutPageProps {
   targetTab?: 'intro' | 'system' | 'permits' | 'location';
@@ -154,7 +154,7 @@ export const CompanyAboutPage: React.FC<CompanyAboutPageProps> = ({ targetTab })
         {/* TAB 1: 회사소개 & CEO 인사말 */}
         {currentTab === 'intro' && (
           <DynamicSectionRenderer
-            sections={content.pageSections?.['about-intro'] || content.pageSections?.['intro'] || []}
+            sections={resolveAboutSections(content.pageSections, 'intro')}
             fallbackSections={getDefaultPageSections('about-intro', content)}
           />
         )}
@@ -162,7 +162,7 @@ export const CompanyAboutPage: React.FC<CompanyAboutPageProps> = ({ targetTab })
         {/* TAB 2: 생산 & 물류시스템 */}
         {currentTab === 'system' && (
           <DynamicSectionRenderer
-            sections={content.pageSections?.['about-system'] || content.pageSections?.['system'] || []}
+            sections={resolveAboutSections(content.pageSections, 'system')}
             fallbackSections={getDefaultPageSections('about-system', content)}
           />
         )}
@@ -170,7 +170,7 @@ export const CompanyAboutPage: React.FC<CompanyAboutPageProps> = ({ targetTab })
         {/* TAB 3: 인허가사항 */}
         {currentTab === 'permits' && (
           <DynamicSectionRenderer
-            sections={content.pageSections?.['about-permits'] || content.pageSections?.['permits'] || []}
+            sections={resolveAboutSections(content.pageSections, 'permits')}
             fallbackSections={getDefaultPageSections('about-permits', content)}
           />
         )}
@@ -178,7 +178,7 @@ export const CompanyAboutPage: React.FC<CompanyAboutPageProps> = ({ targetTab })
         {/* TAB 4: 오시는 길 */}
         {currentTab === 'location' && (
           <DynamicSectionRenderer
-            sections={content.pageSections?.['about-location'] || content.pageSections?.['location'] || []}
+            sections={resolveAboutSections(content.pageSections, 'location')}
             fallbackSections={getDefaultPageSections('about-location', content)}
           />
         )}

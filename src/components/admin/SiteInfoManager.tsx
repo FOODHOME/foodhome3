@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
+import { uploadImageToStorage } from '../../lib/supabase';
 import { Building, Phone, Mail, MapPin, Printer, Clock, FileText, Save, Image as ImageIcon, Upload, RotateCcw } from 'lucide-react';
 import { FoodhomeLogo } from '../FoodhomeLogo';
 
@@ -21,8 +22,10 @@ export const SiteInfoManager: React.FC = () => {
     footerNotice: state.content.footerNotice || '본 사이트의 모든 콘텐츠, 이미지, 제품 디자인은 (주)푸드홈의 자산이며 무단 도용을 금합니다.'
   });
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
     if (!file) return;
 
     // Check file type
@@ -32,14 +35,15 @@ export const SiteInfoManager: React.FC = () => {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
+    const res = await uploadImageToStorage(file, 'logos');
+    if (res.url) {
+      const dataUrl = res.url;
       setForm(prev => ({ ...prev, logoUrl: dataUrl }));
       updateContent({ logoUrl: dataUrl });
       showToast('로고 이미지가 업로드되어 상단/하단에 즉시 적용되었습니다.');
-    };
-    reader.readAsDataURL(file);
+    } else {
+      alert(res.error || '로고 이미지 업로드에 실패했습니다.');
+    }
   };
 
   const handleResetLogo = () => {

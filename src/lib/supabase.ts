@@ -135,19 +135,191 @@ export async function isSiteAdmin(userId?: string): Promise<boolean> {
   return false;
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('이미지 데이터 변환에 실패했습니다.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('파일 읽기에 실패했습니다.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('이미지 디코딩에 실패했습니다.'));
+    img.src = src;
+  });
+}
+
+function canvasHasTransparency(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  try {
+    // Sample image pixels at a manageable grid to detect any non-opaque alpha channel
+    const data = ctx.getImageData(0, 0, width, height).data;
+    const step = Math.max(4, Math.floor(data.length / 40000) * 4);
+    for (let i = 3; i < data.length; i += step) {
+      if (data[i] < 250) return true;
+    }
+  } catch {
+    // Ignore pixel inspection error
+  }
+  return false;
+}
+
+/**
+ * Optimizes an uploaded image into a compact Data URL for reliable localStorage persistence
+ * when external cloud storage is not configured.
+ */
+export async function optimizeImageFileToDataUrl(
+  file: File,
+  folder = 'banners'
+): Promise<{ url: string | null; error?: string }> {
+  try {
+    if (!file.type.startsWith('image/')) {
+      return { url: null, error: '이미지 파일(JPG, PNG, WEBP, GIF, SVG)만 업로드할 수 있습니다.' };
+    }
+
+    // Keep SVG as-is (size capped reasonably)
+    if (file.type === 'image/svg+xml') {
+      if (file.size > 512 * 1024) {
+        return { url: null, error: 'SVG 파일은 500KB 이하만 업로드할 수 있습니다.' };
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      return { url: dataUrl };
+    }
+
+    // Preserve animated/small GIF if under 450KB
+    if (file.type === 'image/gif' && file.size <= 450 * 1024) {
+      const dataUrl = await readFileAsDataUrl(file);
+      return { url: dataUrl };
+    }
+
+    const isLogoOrSignature = folder === 'logos';
+    const maxDimension = isLogoOrSignature ? 640 : 1280;
+    const targetMaxChars = isLogoOrSignature ? 220_000 : 380_000;
+
+    // Small non-oversized images under 140KB can still be checked for pixel dimensions safely
+    const objectUrl = typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL(file) : null;
+    const rawDataUrl = objectUrl ? null : await readFileAsDataUrl(file);
+
+    try {
+      const img = await loadImageElement(objectUrl || (rawDataUrl as string));
+      const origW = img.naturalWidth || img.width;
+      const origH = img.naturalHeight || img.height;
+
+      if (!origW || !origH) {
+        const fallback = rawDataUrl || (await readFileAsDataUrl(file));
+        return { url: fallback };
+      }
+
+      // If already compact and within dimensions, return directly without re-encoding
+      if (file.size <= 140 * 1024 && origW <= maxDimension && origH <= maxDimension) {
+        const directUrl = rawDataUrl || (await readFileAsDataUrl(file));
+        return { url: directUrl };
+      }
+
+      const scale = Math.min(1, maxDimension / Math.max(origW, origH));
+      let targetW = Math.max(1, Math.round(origW * scale));
+      let targetH = Math.max(1, Math.round(origH * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        const fallback = rawDataUrl || (await readFileAsDataUrl(file));
+        return { url: fallback };
+      }
+
+      ctx.drawImage(img, 0, 0, targetW, targetH);
+
+      const keepAlpha =
+        (file.type === 'image/png' || file.type === 'image/webp') &&
+        (isLogoOrSignature || canvasHasTransparency(ctx, targetW, targetH));
+
+      if (keepAlpha) {
+        // Prefer PNG for small transparent graphics; fall back to WebP if PNG is too heavy for localStorage
+        let out = canvas.toDataURL('image/png');
+        if (out.length > targetMaxChars) {
+          const webpOut = canvas.toDataURL('image/webp', 0.86);
+          if (webpOut.startsWith('data:image/webp') && webpOut.length < out.length) {
+            out = webpOut;
+          }
+        }
+        // Step down resolution slightly if still above budget
+        let shrink = 0.8;
+        while (out.length > targetMaxChars && shrink >= 0.45) {
+          const sw = Math.max(1, Math.round(targetW * shrink));
+          const sh = Math.max(1, Math.round(targetH * shrink));
+          const c2 = document.createElement('canvas');
+          c2.width = sw;
+          c2.height = sh;
+          const ctx2 = c2.getContext('2d');
+          if (!ctx2) break;
+          ctx2.drawImage(img, 0, 0, sw, sh);
+          const candidateWebp = c2.toDataURL('image/webp', 0.82);
+          out = candidateWebp.startsWith('data:image/webp') ? candidateWebp : c2.toDataURL('image/png');
+          shrink -= 0.15;
+        }
+        return { url: out };
+      }
+
+      // Opaque photos: use JPEG with adaptive quality & gentle resolution step-down if needed
+      let quality = 0.84;
+      let out = canvas.toDataURL('image/jpeg', quality);
+      while (out.length > targetMaxChars && quality > 0.48) {
+        quality = Math.max(0.45, quality - 0.12);
+        out = canvas.toDataURL('image/jpeg', quality);
+      }
+
+      let shrink = 0.8;
+      while (out.length > targetMaxChars && shrink >= 0.5) {
+        const sw = Math.max(1, Math.round(targetW * shrink));
+        const sh = Math.max(1, Math.round(targetH * shrink));
+        const c2 = document.createElement('canvas');
+        c2.width = sw;
+        c2.height = sh;
+        const ctx2 = c2.getContext('2d');
+        if (!ctx2) break;
+        ctx2.drawImage(img, 0, 0, sw, sh);
+        out = c2.toDataURL('image/jpeg', 0.72);
+        shrink -= 0.15;
+      }
+
+      return { url: out };
+    } finally {
+      if (objectUrl && typeof URL !== 'undefined' && URL.revokeObjectURL) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+  } catch (err: any) {
+    try {
+      const fallback = await readFileAsDataUrl(file);
+      return { url: fallback };
+    } catch {
+      return { url: null, error: err?.message || '이미지 처리에 실패했습니다.' };
+    }
+  }
+}
+
 /**
  * Upload an image file to Supabase Storage bucket 'foodhome-media'
  */
 export async function uploadImageToStorage(file: File, folder = 'banners'): Promise<{ url: string | null; error?: string }> {
+  if (!file.type.startsWith('image/')) {
+    return { url: null, error: '이미지 파일만 업로드할 수 있습니다.' };
+  }
+
   const client = getSupabaseClient();
   if (!client) {
-    // When Supabase is not connected, generate local object URL or data URL
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({ url: reader.result as string });
-      reader.onerror = () => resolve({ url: null, error: '파일 읽기 실패' });
-      reader.readAsDataURL(file);
-    });
+    return optimizeImageFileToDataUrl(file, folder);
   }
 
   try {
@@ -162,19 +334,14 @@ export async function uploadImageToStorage(file: File, folder = 'banners'): Prom
       });
 
     if (uploadError) {
-      console.warn('Supabase storage upload error, falling back to local data URL:', uploadError);
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ url: reader.result as string });
-        reader.onerror = () => resolve({ url: null, error: uploadError.message });
-        reader.readAsDataURL(file);
-      });
+      console.warn('Supabase storage upload error, falling back to local optimized data URL:', uploadError);
+      return optimizeImageFileToDataUrl(file, folder);
     }
 
     const { data } = client.storage.from('foodhome-media').getPublicUrl(fileName);
     return { url: data.publicUrl };
   } catch (e: any) {
-    return { url: null, error: e?.message || '업로드 오류' };
+    return optimizeImageFileToDataUrl(file, folder);
   }
 }
 

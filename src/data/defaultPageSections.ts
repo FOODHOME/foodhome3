@@ -1,5 +1,17 @@
 import { CustomSectionItem, SiteContent, ProductItem } from '../types';
 
+export const resolveAboutSections = (
+  pageSections: Record<string, CustomSectionItem[]> | undefined,
+  subId: string
+): CustomSectionItem[] => {
+  if (!pageSections) return [];
+  const prefixed = pageSections[`about-${subId}`];
+  const plain = pageSections[subId];
+  if (Array.isArray(prefixed) && prefixed.length > 0) return prefixed;
+  if (Array.isArray(plain) && plain.length > 0) return plain;
+  return Array.isArray(prefixed) ? prefixed : (Array.isArray(plain) ? plain : []);
+};
+
 export const getDefaultPageSections = (pageId: string, content: Partial<SiteContent>): CustomSectionItem[] => {
   switch (pageId) {
     case 'about-intro':

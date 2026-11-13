@@ -89,7 +89,9 @@ export const MainSectionsManager: React.FC = () => {
   };
 
   const handleImageUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
     if (!file) return;
 
     setIsUploading(true);
@@ -330,15 +332,21 @@ export const MainSectionsManager: React.FC = () => {
                     />
                     <label className="px-3 py-2 rounded-lg bg-stone-200 hover:bg-stone-300 text-stone-700 font-bold flex items-center gap-1 cursor-pointer shrink-0">
                       <Upload className="w-3.5 h-3.5" />
-                      <span>업로드</span>
+                      <span>{isUploading ? '업로드 중...' : '업로드'}</span>
                       <input
                         type="file"
                         accept="image/*"
+                        disabled={isUploading}
                         className="hidden"
                         onChange={(e) => handleImageUpload(activeEditingSection.id, e)}
                       />
                     </label>
                   </div>
+                  {activeEditingSection.imageUrl?.trim() && (
+                    <div className="mt-2 w-36 h-20 rounded-lg overflow-hidden border border-stone-200 bg-stone-100">
+                      <img src={activeEditingSection.imageUrl} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  )}
                 </div>
 
                 {/* Optional CTA Button */}

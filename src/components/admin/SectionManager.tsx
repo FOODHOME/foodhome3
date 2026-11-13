@@ -64,6 +64,7 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
   const [editingSection, setEditingSection] = useState<CustomSectionItem | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Helper for reordering
   const handleMove = (index: number, direction: 'up' | 'down') => {
@@ -105,30 +106,54 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
       visible: true,
       order: currentSections.length + 1
     };
+    setUploadError(null);
     setEditingSection(newSec);
     setIsModalOpen(true);
   };
 
   // Open modal for editing existing section
   const handleOpenEditModal = (sec: CustomSectionItem) => {
+    setUploadError(null);
     setEditingSection(JSON.parse(JSON.stringify(sec)));
     setIsModalOpen(true);
   };
 
   // Save section from modal
   const handleSaveModal = () => {
-    if (!editingSection) return;
-    const exists = currentSections.some(s => s.id === editingSection.id);
+    if (!editingSection || isUploading) return;
+
+    const cleaned: CustomSectionItem = {
+      ...editingSection,
+      ...(typeof editingSection.imageUrl === 'string' ? { imageUrl: editingSection.imageUrl.trim() } : {}),
+      ...(typeof editingSection.signatureImageUrl === 'string' ? { signatureImageUrl: editingSection.signatureImageUrl.trim() } : {}),
+      ...(Array.isArray(editingSection.images)
+        ? { images: editingSection.images.map((u) => (u || '').trim()).filter(Boolean) }
+        : {})
+    };
+
+    if (cleaned.type === 'image' && !cleaned.imageUrl && !cleaned.title?.trim() && !cleaned.content?.trim()) {
+      setUploadError('단일 이미지 블록은 이미지를 업로드하거나 이미지 URL을 입력해 주세요.');
+      return;
+    }
+
+    if (cleaned.type === 'multi_image' && (!cleaned.images || cleaned.images.length === 0)) {
+      setUploadError('다중 이미지 갤러리는 최소 1개 이상의 이미지를 등록해 주세요.');
+      return;
+    }
+
+    const exists = currentSections.some(s => s.id === cleaned.id);
     let updated: CustomSectionItem[];
     if (exists) {
-      updated = currentSections.map(s => s.id === editingSection.id ? editingSection : s);
+      updated = currentSections.map(s => s.id === cleaned.id ? cleaned : s);
     } else {
-      updated = [...currentSections, editingSection];
+      updated = [...currentSections, cleaned];
     }
     const reordered = updated.map((s, i) => ({ ...s, order: i + 1 }));
     onChange(reordered);
+    onSave?.();
     setIsModalOpen(false);
     setEditingSection(null);
+    setUploadError(null);
   };
 
   // Reset to default template
@@ -138,24 +163,33 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
     }
   };
 
-  // Image upload handler
+  // Image upload handler (resets input and uses functional state updater to avoid stale closures)
   const handleUploadImage = async (field: 'imageUrl' | 'bgImage' | 'signatureImageUrl' | { type: 'multi'; index: number }, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
     if (!file || !editingSection) return;
+
+    setUploadError(null);
     setIsUploading(true);
-    const res = await uploadImageToStorage(file, 'sections');
+    const res = await uploadImageToStorage(file, field === 'signatureImageUrl' ? 'logos' : 'sections');
     setIsUploading(false);
 
     if (res.url) {
-      if (typeof field === 'string') {
-        setEditingSection({ ...editingSection, [field]: res.url });
-      } else if (field.type === 'multi') {
-        const curImages = [...(editingSection.images || [])];
-        curImages[field.index] = res.url;
-        setEditingSection({ ...editingSection, images: curImages });
-      }
+      const uploadedUrl = res.url;
+      setEditingSection((prev) => {
+        if (!prev) return prev;
+        if (typeof field === 'string') {
+          return { ...prev, [field]: uploadedUrl };
+        }
+        const curImages = [...(prev.images || [])];
+        curImages[field.index] = uploadedUrl;
+        return { ...prev, images: curImages };
+      });
     } else {
-      alert(res.error || '이미지 업로드에 실패했습니다.');
+      const errMsg = res.error || '이미지 업로드에 실패했습니다.';
+      setUploadError(errMsg);
+      alert(errMsg);
     }
   };
 
@@ -229,28 +263,40 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                 </div>
 
                 {/* Title & Preview */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    {sec.badge && (
-                      <span className="text-[10px] font-black text-[#872D35] bg-[#872D35]/5 px-1.5 py-0.2 rounded border border-[#872D35]/15">
-                        {sec.badge}
-                      </span>
-                    )}
-                    <span className="text-xs font-black text-stone-900 truncate">
-                      {sec.title || (sec.type === 'divider' ? '— 구분선 —' : '제목 없음')}
-                    </span>
-                    {sec.imagePosition && (
-                      <span className="text-[10px] text-stone-400 font-mono">
-                        ({sec.imagePosition === 'left' ? '이미지 좌측' : sec.imagePosition === 'right' ? '이미지 우측' : '이미지 상단'})
-                      </span>
-                    )}
-                  </div>
-                  {sec.content && (
-                    <p className="text-[11px] text-stone-500 truncate mt-0.5 max-w-lg">
-                      {sec.content}
-                    </p>
-                  )}
-                </div>
+                {(() => {
+                  const previewThumb = sec.imageUrl?.trim() || sec.images?.find(u => u && u.trim()) || sec.signatureImageUrl?.trim();
+                  return (
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {previewThumb && (
+                        <div className="w-9 h-9 rounded-lg overflow-hidden border border-stone-200 bg-stone-100 shrink-0">
+                          <img src={previewThumb} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          {sec.badge && (
+                            <span className="text-[10px] font-black text-[#872D35] bg-[#872D35]/5 px-1.5 py-0.2 rounded border border-[#872D35]/15">
+                              {sec.badge}
+                            </span>
+                          )}
+                          <span className="text-xs font-black text-stone-900 truncate">
+                            {sec.title || (sec.type === 'divider' ? '— 구분선 —' : '제목 없음')}
+                          </span>
+                          {sec.imagePosition && (
+                            <span className="text-[10px] text-stone-400 font-mono">
+                              ({sec.imagePosition === 'left' ? '이미지 좌측' : sec.imagePosition === 'right' ? '이미지 우측' : '이미지 상단'})
+                            </span>
+                          )}
+                        </div>
+                        {sec.content && (
+                          <p className="text-[11px] text-stone-500 truncate mt-0.5 max-w-lg">
+                            {sec.content}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Action buttons */}
@@ -356,7 +402,16 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                       <button
                         key={typeKey}
                         type="button"
-                        onClick={() => setEditingSection({ ...editingSection, type: typeKey })}
+                        onClick={() => {
+                          setUploadError(null);
+                          setEditingSection(prev => {
+                            if (!prev) return prev;
+                            if (typeKey === 'multi_image' && (!prev.images || prev.images.length === 0)) {
+                              return { ...prev, type: typeKey, images: [''] };
+                            }
+                            return { ...prev, type: typeKey };
+                          });
+                        }}
                         className={`p-2.5 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer ${
                           isSelected
                             ? 'border-[#872D35] bg-[#872D35]/5 ring-1 ring-[#872D35]'
@@ -636,10 +691,13 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const cur = editingSection.images || [];
-                        setEditingSection({ ...editingSection, images: [...cur, ''] });
+                        setEditingSection(prev => {
+                          if (!prev) return prev;
+                          const cur = prev.images || [];
+                          return { ...prev, images: [...cur, ''] };
+                        });
                       }}
-                      className="text-xs font-bold text-[#872D35] hover:underline"
+                      className="text-xs font-bold text-[#872D35] hover:underline cursor-pointer"
                     >
                       + 이미지 추가
                     </button>
@@ -647,22 +705,32 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                   <div className="space-y-2">
                     {(editingSection.images || []).map((imgUrl, i) => (
                       <div key={i} className="flex items-center gap-2">
+                        {imgUrl?.trim() && (
+                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-stone-200 bg-stone-100 shrink-0">
+                            <img src={imgUrl} alt="" className="w-full h-full object-cover" />
+                          </div>
+                        )}
                         <input
                           type="text"
                           value={imgUrl}
                           onChange={(e) => {
-                            const cur = [...(editingSection.images || [])];
-                            cur[i] = e.target.value;
-                            setEditingSection({ ...editingSection, images: cur });
+                            const val = e.target.value;
+                            setEditingSection(prev => {
+                              if (!prev) return prev;
+                              const cur = [...(prev.images || [])];
+                              cur[i] = val;
+                              return { ...prev, images: cur };
+                            });
                           }}
                           placeholder={`이미지 #${i + 1} URL`}
                           className="flex-1 px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-mono bg-white"
                         />
                         <label className="px-2.5 py-1.5 rounded-lg bg-stone-800 text-white text-xs font-bold cursor-pointer shrink-0">
-                          <span>업로드</span>
+                          <span>{isUploading ? '업로드 중...' : '업로드'}</span>
                           <input
                             type="file"
                             accept="image/*"
+                            disabled={isUploading}
                             onChange={(e) => handleUploadImage({ type: 'multi', index: i }, e)}
                             className="hidden"
                           />
@@ -670,10 +738,13 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const cur = (editingSection.images || []).filter((_, idx) => idx !== i);
-                            setEditingSection({ ...editingSection, images: cur });
+                            setEditingSection(prev => {
+                              if (!prev) return prev;
+                              const cur = (prev.images || []).filter((_, idx) => idx !== i);
+                              return { ...prev, images: cur };
+                            });
                           }}
-                          className="p-1.5 text-red-500 hover:text-red-700"
+                          className="p-1.5 text-red-500 hover:text-red-700 cursor-pointer"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -895,21 +966,31 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
 
             </div>
 
+            {uploadError && (
+              <div className="px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+                {uploadError}
+              </div>
+            )}
+
             {/* Modal Actions */}
             <div className="flex items-center justify-end gap-2 pt-4 border-t border-stone-200">
               <button
                 type="button"
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setUploadError(null);
+                }}
                 className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-50 cursor-pointer"
               >
                 취소
               </button>
               <button
                 type="button"
+                disabled={isUploading}
                 onClick={handleSaveModal}
-                className="px-5 py-2 rounded-xl bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-black shadow-sm cursor-pointer"
+                className="px-5 py-2 rounded-xl bg-[#872D35] hover:bg-[#6D242B] disabled:opacity-50 text-white text-xs font-black shadow-sm cursor-pointer"
               >
-                블록 저장
+                {isUploading ? '이미지 처리 중...' : '블록 저장'}
               </button>
             </div>
 
