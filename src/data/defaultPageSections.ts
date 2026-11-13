@@ -32,7 +32,7 @@ export const getDefaultPageSections = (pageId: string, content: Partial<SiteCont
         {
           id: 'sec-intro-signature',
           type: 'signature',
-          authorRole: '주식회사 푸드홈 대표이사',
+          authorRole: content.ceoRole || '주식회사 푸드홈 대표이사',
           authorName: content.ceoName || '김진성',
           signatureImageUrl: content.ceoSignatureImage || '',
           visible: true,

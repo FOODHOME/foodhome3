@@ -90,13 +90,13 @@ export const FaqBoardPage: React.FC = () => {
         <div className="relative z-10 text-center max-w-4xl mx-auto px-4">
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#872D35]/80 text-white text-xs font-bold mb-3 backdrop-blur-xs border border-white/20">
             <HelpCircle className="w-3.5 h-3.5 text-amber-300" />
-            <span>CUSTOMER SUPPORT FAQ</span>
+            <span>{state.content.faqPageBadge || 'CUSTOMER SUPPORT FAQ'}</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight drop-shadow-md">
-            자주하는 질문 (FAQ)
+            {state.content.faqPageTitle || '자주하는 질문 (FAQ)'}
           </h1>
           <p className="mt-2 text-sm sm:text-base text-stone-200 font-medium max-w-xl mx-auto drop-shadow-sm">
-            외식업 대표님들께서 가장 많이 문의하시는 무료 샘플 신청, 대량 발주, 물류 및 보관에 대한 질문과 답변입니다.
+            {state.content.faqPageSubtitle || '외식업 대표님들께서 가장 많이 문의하시는 무료 샘플 신청, 대량 발주, 물류 및 보관에 대한 질문과 답변입니다.'}
           </p>
         </div>
       </section>

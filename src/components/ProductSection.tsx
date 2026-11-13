@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { ProductItem } from '../types';
+import {
+  getProductBadges,
+  getProductSpecItems,
+  getVisibleSpecByKey,
+  getBadgeColorClass,
+  renderBadgeIcon
+} from '../utils/productUtils';
 import { 
   Sparkles, 
   Eye, 
@@ -39,9 +46,11 @@ export const ProductSection: React.FC = () => {
 
   const categories = ['전체보기', '보쌈무김치', '김칫속/양념', '업소용 대용량', '소포장/밀키트'];
 
+  const visibleProducts = state.products.filter(p => p.visible !== false);
+
   const filteredProducts = activeCategory === '전체보기'
-    ? state.products
-    : state.products.filter(p => p.category === activeCategory);
+    ? visibleProducts
+    : visibleProducts.filter(p => p.category === activeCategory || (p.categories && p.categories.includes(activeCategory)));
 
   const smartStoreUrl = state.social.smartStoreUrl || 'https://smartstore.naver.com/foodhome/products/4266908131';
   const cfg = state.content.mainSections?.find(s => s.id === 'products');
@@ -104,7 +113,7 @@ export const ProductSection: React.FC = () => {
               }`}
             >
               {cat}
-              {cat === '전체보기' && ` (${state.products.length})`}
+              {cat === '전체보기' && ` (${visibleProducts.length})`}
             </button>
           ))}
         </div>
@@ -134,27 +143,34 @@ export const ProductSection: React.FC = () => {
                     loading="lazy"
                   />
                   
-                  {/* Category Tag */}
-                  <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1.5">
-                    <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-[#872D35] text-white shadow-2xs">
-                      {product.tag || product.category}
-                    </span>
-                  </div>
-
-                  {product.isPopular && (
-                    <div className="absolute top-2.5 right-2.5">
-                      <span className="text-[11px] font-extrabold px-2 py-0.5 rounded bg-[#332525]/90 text-amber-300 backdrop-blur-xs">
-                        추천
-                      </span>
-                    </div>
-                  )}
+                  {/* Dynamic Product Badges */}
+                  {(() => {
+                    const visibleBadges = getProductBadges(product).filter(b => b.visible && b.text?.trim());
+                    if (visibleBadges.length === 0) return null;
+                    return (
+                      <div className="absolute top-2.5 left-2.5 right-2.5 flex flex-wrap gap-1.5">
+                        {visibleBadges.map(badge => (
+                          <span
+                            key={badge.id}
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded shadow-2xs flex items-center gap-1 ${getBadgeColorClass(badge.color)}`}
+                          >
+                            {renderBadgeIcon(badge.icon, 'w-3 h-3')}
+                            <span>{badge.text}</span>
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Content */}
                 <div className="p-4 space-y-2">
                   <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold">
                     <span>{product.category}</span>
-                    <span>{product.weight}</span>
+                    {(() => {
+                      const weightSpec = getVisibleSpecByKey(product, 'weight');
+                      return weightSpec ? <span>{weightSpec.value}</span> : null;
+                    })()}
                   </div>
 
                   <h3 
@@ -169,17 +185,22 @@ export const ProductSection: React.FC = () => {
                     {product.subtitle}
                   </p>
 
-                  {/* Specs Quick Summary */}
-                  <div className="pt-2 text-[11px] text-slate-500 space-y-1 border-t border-[#F0EBE6]">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">보관방법:</span>
-                      <span className="font-medium text-slate-700">{product.storage}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400">소비기한:</span>
-                      <span className="font-medium text-slate-700">{product.shelfLife}</span>
-                    </div>
-                  </div>
+                  {/* Specs Quick Summary (respects hidden status & renamed labels) */}
+                  {(() => {
+                    const cardSpecs = getProductSpecItems(product)
+                      .filter(s => s.visible && s.value?.trim() && (s.key === 'storage' || s.key === 'shelfLife'));
+                    if (cardSpecs.length === 0) return null;
+                    return (
+                      <div className="pt-2 text-[11px] text-slate-500 space-y-1 border-t border-[#F0EBE6]">
+                        {cardSpecs.map(spec => (
+                          <div key={spec.id} className="flex items-center justify-between gap-2">
+                            <span className="text-slate-400 shrink-0">{spec.label}:</span>
+                            <span className="font-medium text-slate-700 truncate">{spec.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

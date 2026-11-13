@@ -4,6 +4,15 @@ import { ProductItem } from '../types';
 import { DynamicSectionRenderer } from './DynamicSectionRenderer';
 import { getDefaultProductSections } from '../data/defaultPageSections';
 import { 
+  getProductBadges, 
+  getProductFeatureCards, 
+  getProductSpecItems, 
+  getVisibleSpecByKey,
+  getBadgeColorClass, 
+  renderBadgeIcon, 
+  renderFeatureIcon 
+} from '../utils/productUtils';
+import { 
   Package, 
   Sparkles, 
   Truck, 
@@ -163,35 +172,38 @@ export const ProductDetailPage: React.FC = () => {
                 <img
                   src={activeImage || product.imageUrl}
                   alt={product.name}
-                  draggable={false}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105 select-none pointer-events-auto"
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
                 
                 {/* Floating Badges */}
-                <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2 pointer-events-none">
-                  <span className="px-3 py-1 rounded-full bg-[#872D35] text-white text-xs font-black shadow-md">
-                    {product.tag || 'B2B 대표'}
-                  </span>
-                  {product.isPopular && (
-                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-[11px] font-black flex items-center gap-1 shadow-md">
-                      <Flame className="w-3.5 h-3.5" /> 인기 납품
-                    </span>
-                  )}
-                  {product.isRecommended && (
-                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[11px] font-black flex items-center gap-1 shadow-md">
-                      <Award className="w-3.5 h-3.5" /> 추천 상품
-                    </span>
-                  )}
-                </div>
+                {(() => {
+                  const visibleBadges = getProductBadges(product).filter(b => b.visible && b.text?.trim());
+                  if (visibleBadges.length === 0) return null;
+                  return (
+                    <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2">
+                      {visibleBadges.map((badge) => (
+                        <span
+                          key={badge.id}
+                          className={`px-3 py-1 rounded-full text-xs font-black shadow-md flex items-center gap-1 ${getBadgeColorClass(badge.color)}`}
+                        >
+                          {renderBadgeIcon(badge.icon)}
+                          <span>{badge.text}</span>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
 
-                {/* Weight Chip */}
-                <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-xs text-white text-xs font-extrabold tracking-wide shadow-md pointer-events-none">
-                  규격: {product.weight}
-                </div>
+                {/* Weight Chip (Only shown if weight spec item is visible & not deleted) */}
+                {(() => {
+                  const weightSpec = getVisibleSpecByKey(product, 'weight');
+                  if (!weightSpec) return null;
+                  return (
+                    <div className="absolute bottom-4 right-4 px-3 py-1.5 rounded-xl bg-black/75 backdrop-blur-xs text-white text-xs font-extrabold tracking-wide shadow-md">
+                      {weightSpec.label || '규격'}: {weightSpec.value}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Thumbnail Gallery (if multiple images exist) */}
@@ -207,80 +219,31 @@ export const ProductDetailPage: React.FC = () => {
                           : 'border-stone-200 hover:border-stone-400 opacity-70 hover:opacity-100'
                       }`}
                     >
-                      <img 
-                        src={img} 
-                        alt="" 
-                        draggable={false}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                        className="w-full h-full object-cover select-none" 
-                      />
+                      <img src={img} alt="" className="w-full h-full object-cover" />
                     </button>
                   ))}
                 </div>
               )}
 
-              {/* Dynamic Feature Badges Under Image */}
+              {/* Feature Cards Under Image (Configurable & Dynamic Layout) */}
               {(() => {
-                const cards = (product.featureCards && product.featureCards.length > 0)
-                  ? product.featureCards.filter(c => c.visible !== false)
-                  : [
-                      { id: 'pfc-1', icon: 'Sparkles', title: '특허 수분제어', desc: '물 생김 제로', visible: true },
-                      { id: 'pfc-2', icon: 'CheckCircle2', title: '100% 국산 농산물', desc: '산지 계약재배', visible: true },
-                      { id: 'pfc-3', icon: 'ShieldCheck', title: '위생 안심 공정', desc: 'HACCP 스마트팩토리', visible: true },
-                      { id: 'pfc-4', icon: 'Truck', title: '전국 콜드체인', desc: '0~5℃ 익일 직배송', visible: true },
-                    ];
-
-                if (cards.length === 0) return null;
-
-                const gridColClass = cards.length === 2 
-                  ? 'grid-cols-2' 
-                  : cards.length === 3 
-                  ? 'grid-cols-3' 
-                  : 'grid-cols-2 sm:grid-cols-4';
-
-                const ICON_MAPPING: Record<string, any> = {
-                  Sparkles,
-                  CheckCircle2,
-                  ShieldCheck,
-                  Truck,
-                  Award,
-                  Flame,
-                  Clock,
-                  Thermometer,
-                  Package,
-                  Store,
-                  Phone,
-                  Info,
-                  Layers,
-                  Check
-                };
+                const visibleCards = getProductFeatureCards(product).filter(c => c.visible && (c.title?.trim() || c.desc?.trim()));
+                if (visibleCards.length === 0) return null;
+                const gridColsClass = 
+                  visibleCards.length === 1 ? 'grid-cols-1' :
+                  visibleCards.length === 2 ? 'grid-cols-2' :
+                  visibleCards.length === 3 ? 'grid-cols-3' :
+                  'grid-cols-2 sm:grid-cols-4';
 
                 return (
-                  <div 
-                    className={`grid ${gridColClass} gap-2.5 pt-2`}
-                    data-editable-id="product_feature_cards"
-                    data-product-id={product.id}
-                  >
-                    {cards.map((card, cIdx) => {
-                      const IconComp = (card.icon && ICON_MAPPING[card.icon]) || Sparkles;
-                      return (
-                        <div 
-                          key={card.id || cIdx}
-                          className="p-3 rounded-xl border border-[#E8E2DC] text-center transition-all"
-                          style={{ 
-                            backgroundColor: card.bg || '#FAF8F5',
-                            color: card.textColor || '#2A2020'
-                          }}
-                        >
-                          <IconComp className="w-4 h-4 text-[#872D35] mx-auto mb-1" />
-                          <span className="text-[11px] font-black text-stone-800 block truncate">{card.title}</span>
-                          <span className="text-[10px] text-stone-500 block truncate">{card.desc}</span>
-                        </div>
-                      );
-                    })}
+                  <div className={`grid ${gridColsClass} gap-2.5 pt-2`}>
+                    {visibleCards.map((card) => (
+                      <div key={card.id} className="p-3 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC] text-center">
+                        {renderFeatureIcon(card.icon, "w-4 h-4 text-[#872D35] mx-auto mb-1")}
+                        <span className="text-[11px] font-black text-stone-800 block truncate">{card.title}</span>
+                        <span className="text-[10px] text-stone-500 block truncate">{card.desc}</span>
+                      </div>
+                    ))}
                   </div>
                 );
               })()}
@@ -312,80 +275,51 @@ export const ProductDetailPage: React.FC = () => {
                 </p>
 
                 {/* B2B Wholesale Price Box */}
-                <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#FAF8F5] to-stone-100 border border-[#E8E2DC] space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-[#872D35] flex items-center gap-1.5">
-                      <Store className="w-4 h-4" />
-                      <span>외식업 사업자 전용 도매 납품가</span>
-                    </span>
-                    <span className="text-[11px] px-2 py-0.5 rounded bg-[#872D35] text-white font-black">
-                      B2B 특가 지원
-                    </span>
-                  </div>
-                  
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xl sm:text-2xl font-black text-stone-900">
-                      1:1 맞춤 견적 단가 적용
-                    </span>
-                    <span className="text-xs text-stone-500 font-medium">
-                      (월 발주량에 따른 계단식 할인)
-                    </span>
-                  </div>
+                {product.wholesalePriceBoxVisible !== false && (
+                  <div className="mt-4 p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-[#FAF8F5] to-stone-100 border border-[#E8E2DC] space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-[#872D35] flex items-center gap-1.5">
+                        <Store className="w-4 h-4" />
+                        <span>{product.bulkPriceTitle || '외식업 사업자 전용 도매 납품가'}</span>
+                      </span>
+                      <span className="text-[11px] px-2 py-0.5 rounded bg-[#872D35] text-white font-black">
+                        {product.bulkPriceBadge || 'B2B 특가 지원'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xl sm:text-2xl font-black text-stone-900">
+                        {product.bulkPriceHeading || '1:1 맞춤 견적 단가 적용'}
+                      </span>
+                      <span className="text-xs text-stone-500 font-medium">
+                        {product.bulkPriceSubtitle || '(월 발주량에 따른 계단식 할인)'}
+                      </span>
+                    </div>
 
-                  <p className="text-xs text-stone-600 leading-relaxed font-medium pt-1">
-                    {product.bulkPriceGuide || '외식업 대표님 및 프랜차이즈 본사 고객님께는 매장 규모 및 월간 소진량에 맞춘 최저 도매 단가를 산정하여 드립니다.'}
-                  </p>
-                </div>
-
-                {/* Specs List Table */}
-                <div className="mt-5 space-y-2.5 text-xs text-stone-700 border-t border-stone-100 pt-4">
-                  <div className="flex items-start py-1 border-b border-stone-100">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">공급 규격 / 용량</span>
-                    <span className="font-extrabold text-stone-900">{product.weight}</span>
+                    <p className="text-xs text-stone-600 leading-relaxed font-medium pt-1">
+                      {product.bulkPriceGuide || '외식업 대표님 및 프랜차이즈 본사 고객님께는 매장 규모 및 월간 소진량에 맞춘 최저 도매 단가를 산정하여 드립니다.'}
+                    </p>
                   </div>
+                )}
 
-                  <div className="flex items-start py-1 border-b border-stone-100">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">포장 형태</span>
-                    <span className="font-semibold text-stone-800">
-                      {product.packagingType || '식품 전용 위생 2중 안심실링 진공팩'}
-                    </span>
-                  </div>
+                {/* Dynamic Specs List Table (Supports Add / Edit / Reorder / Hide / Delete) */}
+                {(() => {
+                  const visibleSpecs = getProductSpecItems(product).filter(s => s.visible && s.value?.trim());
+                  if (visibleSpecs.length === 0) return null;
 
-                  <div className="flex items-start py-1 border-b border-stone-100">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">보관 방법</span>
-                    <span className="font-semibold text-stone-800 flex items-center gap-1">
-                      <Thermometer className="w-3.5 h-3.5 text-[#872D35]" />
-                      <span>{product.storage}</span>
-                    </span>
-                  </div>
-
-                  <div className="flex items-start py-1 border-b border-stone-100">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">소비 기한</span>
-                    <span className="font-semibold text-stone-800 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-stone-500" />
-                      <span>{product.shelfLife}</span>
-                    </span>
-                  </div>
-
-                  <div className="flex items-start py-1 border-b border-stone-100">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">주요 원재료</span>
-                    <span className="text-stone-700 leading-relaxed">{product.ingredients}</span>
-                  </div>
-
-                  <div className="flex items-start py-1 border-b border-stone-100">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">원산지 정보</span>
-                    <span className="font-semibold text-stone-800">
-                      {product.origin || '무(국내산 100%), 고춧가루(국내산), 천일염(국내산 신안 천일염)'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-start py-1">
-                    <span className="w-28 font-bold text-stone-500 shrink-0">배송 및 공급</span>
-                    <span className="font-semibold text-stone-800">
-                      {product.deliveryInfo || '주문 확인 후 24시간 이내 당일 생산 / 콜드체인 익일 직배송'}
-                    </span>
-                  </div>
-                </div>
+                  return (
+                    <div className="mt-5 space-y-2.5 text-xs text-stone-700 border-t border-stone-100 pt-4">
+                      {visibleSpecs.map((spec) => (
+                        <div key={spec.id} className="flex items-start py-1 border-b border-stone-100 last:border-b-0">
+                          <span className="w-28 font-bold text-stone-500 shrink-0">{spec.label}</span>
+                          <span className="font-semibold text-stone-800 leading-relaxed whitespace-pre-line flex-1">
+                            {spec.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* B2B Call-To-Action Action Buttons */}
@@ -398,7 +332,7 @@ export const ProductDetailPage: React.FC = () => {
                     className="w-full py-3.5 px-4 rounded-xl bg-[#872D35] hover:bg-[#6D242B] text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-sm transition-all hover:scale-[1.01] cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>사업자 1kg 무료 샘플 신청</span>
+                    <span>{product.buttonText || '사업자 1kg 무료 샘플 신청'}</span>
                   </button>
 
                   {/* Secondary CTA: Wholesale Quote Consultation */}
@@ -407,23 +341,25 @@ export const ProductDetailPage: React.FC = () => {
                     className="w-full py-3.5 px-4 rounded-xl bg-[#2A2020] hover:bg-black text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-sm transition-all hover:scale-[1.01] cursor-pointer"
                   >
                     <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                    <span>대량 납품 견적서 요청</span>
+                    <span>{product.secondaryButtonText || '대량 납품 견적서 요청'}</span>
                   </button>
                 </div>
 
-                <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-[11px] text-amber-900 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Info className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>사업자등록증 소지 외식업 대표님께는 택배비까지 전액 무료로 샘플을 발송합니다.</span>
+                {product.detailNoticeVisible !== false && (
+                  <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-[11px] text-amber-900 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{product.detailNoticeText || '사업자등록증 소지 외식업 대표님께는 택배비까지 전액 무료로 샘플을 발송합니다.'}</span>
+                    </div>
+                    <a
+                      href={`tel:${product.detailNoticePhone || state.content.phone || '043-532-8890'}`}
+                      className="font-bold text-[#872D35] flex items-center gap-1 shrink-0 hover:underline"
+                    >
+                      <Phone className="w-3 h-3" />
+                      <span>{product.detailNoticePhone || state.content.phone || '043-532-8890'}</span>
+                    </a>
                   </div>
-                  <a
-                    href="tel:043-532-8890"
-                    className="font-bold text-[#872D35] flex items-center gap-1 shrink-0 hover:underline"
-                  >
-                    <Phone className="w-3 h-3" />
-                    <span>043-532-8890</span>
-                  </a>
-                </div>
+                )}
               </div>
 
             </div>
@@ -476,8 +412,10 @@ export const ProductDetailPage: React.FC = () => {
                   <p className="text-[11px] text-stone-500 line-clamp-1 mt-0.5">{p.subtitle}</p>
                 </div>
                 <div className="mt-3 pt-3 border-t border-stone-100 flex items-center justify-between text-xs">
-                  <span className="font-mono text-[11px] text-stone-400 font-bold">{p.weight}</span>
-                  <span className="font-bold text-[#872D35] flex items-center gap-0.5">
+                  <span className="font-mono text-[11px] text-stone-400 font-bold">
+                    {getVisibleSpecByKey(p, 'weight')?.value || ''}
+                  </span>
+                  <span className="font-bold text-[#872D35] flex items-center gap-0.5 ml-auto">
                     상세보기 ›
                   </span>
                 </div>

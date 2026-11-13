@@ -1,6 +1,12 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
 import { 
+  getProductBadges, 
+  getProductSpecItems, 
+  getBadgeColorClass, 
+  renderBadgeIcon 
+} from '../utils/productUtils';
+import { 
   X, 
   ShieldCheck, 
   Sparkles, 
@@ -14,13 +20,15 @@ export const ProductDetailModal: React.FC = () => {
   const { 
     selectedProductForDetail, 
     setSelectedProductForDetail, 
-    setActivePage,
+    setActivePage, 
     state 
   } = useApp();
 
   if (!selectedProductForDetail) return null;
 
   const product = selectedProductForDetail;
+  const visibleBadges = getProductBadges(product).filter(b => b.visible && b.text?.trim());
+  const visibleSpecs = getProductSpecItems(product).filter(s => s.visible && s.value?.trim());
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
@@ -48,23 +56,41 @@ export const ProductDetailModal: React.FC = () => {
         <div className="p-6 space-y-6">
           {/* Top Hero Media & Name */}
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center">
-            <div className="sm:col-span-5 rounded-xl overflow-hidden aspect-square bg-stone-100 border border-[#E8E2DC]">
+            <div className="sm:col-span-5 rounded-xl overflow-hidden aspect-square bg-stone-100 border border-[#E8E2DC] relative">
               <img 
                 src={product.imageUrl} 
                 alt={product.name} 
-                draggable={false}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                className="w-full h-full object-cover select-none"
+                className="w-full h-full object-cover"
               />
+              {visibleBadges.length > 0 && (
+                <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
+                  {visibleBadges.slice(0, 2).map(b => (
+                    <span 
+                      key={b.id} 
+                      className={`text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs flex items-center gap-1 ${getBadgeColorClass(b.color)}`}
+                    >
+                      {renderBadgeIcon(b.icon, "w-3 h-3")}
+                      <span>{b.text}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             
             <div className="sm:col-span-7 space-y-2">
-              <span className="text-xs font-bold text-[#872D35] block">
-                {product.tag}
-              </span>
+              {visibleBadges.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {visibleBadges.map(b => (
+                    <span 
+                      key={b.id}
+                      className={`text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1 ${getBadgeColorClass(b.color)}`}
+                    >
+                      {renderBadgeIcon(b.icon, "w-3 h-3")}
+                      <span>{b.text}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
               <h3 className="text-xl sm:text-2xl font-black text-[#2A2020] leading-snug">
                 {product.name}
               </h3>
@@ -84,38 +110,25 @@ export const ProductDetailModal: React.FC = () => {
             {product.description}
           </div>
 
-          {/* Specifications Table */}
-          <div className="border border-[#E8E2DC] rounded-xl overflow-hidden text-xs sm:text-sm">
-            <div className="grid grid-cols-3 p-3 bg-[#FAF8F5] border-b border-[#E8E2DC] font-bold text-[#332525]">
-              <span>규격 항목</span>
-              <span className="col-span-2">상세 내역</span>
+          {/* Dynamic Specifications Table (Rows hidden in admin are omitted completely) */}
+          {visibleSpecs.length > 0 && (
+            <div className="border border-[#E8E2DC] rounded-xl overflow-hidden text-xs sm:text-sm">
+              <div className="grid grid-cols-3 p-3 bg-[#FAF8F5] border-b border-[#E8E2DC] font-bold text-[#332525]">
+                <span>규격 항목</span>
+                <span className="col-span-2">상세 내역</span>
+              </div>
+              {visibleSpecs.map((spec) => (
+                <div key={spec.id} className="grid grid-cols-3 p-3 border-b border-[#F0EBE6] last:border-b-0 text-slate-600">
+                  <span className="font-semibold text-slate-800">
+                    {spec.label}
+                  </span>
+                  <span className="col-span-2 leading-relaxed whitespace-pre-line text-slate-700">
+                    {spec.value}
+                  </span>
+                </div>
+              ))}
             </div>
-            <div className="grid grid-cols-3 p-3 border-b border-[#F0EBE6] text-slate-600">
-              <span className="font-semibold text-slate-800 flex items-center gap-1">
-                <Layers className="w-3.5 h-3.5 text-[#872D35]" />
-                포장 중량
-              </span>
-              <span className="col-span-2 font-medium">{product.weight}</span>
-            </div>
-            <div className="grid grid-cols-3 p-3 border-b border-[#F0EBE6] text-slate-600">
-              <span className="font-semibold text-slate-800 flex items-center gap-1">
-                <Thermometer className="w-3.5 h-3.5 text-[#872D35]" />
-                보관 방법
-              </span>
-              <span className="col-span-2">{product.storage}</span>
-            </div>
-            <div className="grid grid-cols-3 p-3 border-b border-[#F0EBE6] text-slate-600">
-              <span className="font-semibold text-slate-800 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-[#872D35]" />
-                유통 기한
-              </span>
-              <span className="col-span-2">{product.shelfLife}</span>
-            </div>
-            <div className="grid grid-cols-3 p-3 text-slate-600">
-              <span className="font-semibold text-slate-800">원재료 및 함량</span>
-              <span className="col-span-2 leading-relaxed">{product.ingredients}</span>
-            </div>
-          </div>
+          )}
 
           {/* Bulk Price Guidance */}
           <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC] flex items-start gap-3">

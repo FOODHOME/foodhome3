@@ -17,7 +17,6 @@ import { FaqManager } from './admin/FaqManager';
 import { GnbMenuManager } from './admin/GnbMenuManager';
 import { SectionContentModal } from './admin/SectionContentModal';
 import { MainSectionsManager } from './admin/MainSectionsManager';
-import { VisualEditor } from './admin/visual-builder/VisualEditor';
 import { 
   X, 
   LayoutDashboard, 
@@ -176,19 +175,8 @@ export const AdminDashboard: React.FC = () => {
   // Inquiry Filter & Active note
   const [inquiryFilter, setInquiryFilter] = useState<'전체' | '접수대기' | '샘플발송완료' | '상담완료'>('전체');
   const [selectedInquiryNoteId, setSelectedInquiryNoteId] = useState<string | null>(null);
-  // Visual Editor vs Classic Form Manager Mode Switcher
-  const [adminMode, setAdminMode] = useState<'visual' | 'classic'>('visual');
 
   if (!isAdminOpen) return null;
-
-  if (adminMode === 'visual') {
-    return (
-      <VisualEditor
-        onClose={() => setIsAdminOpen(false)}
-        onSwitchToClassic={() => setAdminMode('classic')}
-      />
-    );
-  }
 
   // Korean food luxury red preset palettes
   const redPalettes = [
@@ -663,14 +651,6 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={() => setAdminMode('visual')}
-              className="px-3.5 py-1.5 rounded-xl bg-[#872D35] hover:bg-[#A3343E] text-white text-xs font-black flex items-center gap-1.5 transition-all shadow-md cursor-pointer animate-pulse"
-              title="실시간 화면을 직접 보며 클릭하여 편집하는 비주얼 에디터로 전환"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>🎨 비주얼 화면 편집기</span>
-            </button>
             <button
               onClick={() => setIsAdminOpen(false)}
               className="px-3 py-1.5 rounded-lg bg-stone-800 text-xs font-bold text-stone-300 hover:text-white hover:bg-stone-700 transition-colors flex items-center gap-1 cursor-pointer"

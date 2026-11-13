@@ -392,10 +392,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateContent = (newContent: Partial<SiteContent>) => {
-    setState(prev => ({
-      ...prev,
-      content: { ...prev.content, ...newContent }
-    }));
+    setState(prev => {
+      const mergedContent: SiteContent = { ...prev.content, ...newContent };
+      const hasCeoUpdate =
+        newContent.ceoName !== undefined ||
+        newContent.ceoRole !== undefined ||
+        newContent.ceoTitle !== undefined ||
+        newContent.ceoGreeting !== undefined ||
+        newContent.ceoImageUrl !== undefined ||
+        newContent.ceoSignatureImage !== undefined ||
+        newContent.ceoSubtitle !== undefined;
+
+      if (hasCeoUpdate && prev.content.pageSections && !newContent.pageSections) {
+        const nextPageSections = { ...prev.content.pageSections };
+        ['about-intro', 'intro'].forEach((key) => {
+          const list = nextPageSections[key];
+          if (Array.isArray(list)) {
+            nextPageSections[key] = list.map((sec) => {
+              if (sec.id === 'sec-intro-text-1') {
+                return {
+                  ...sec,
+                  ...(newContent.ceoTitle !== undefined ? { title: newContent.ceoTitle } : {}),
+                  ...(newContent.ceoGreeting !== undefined ? { content: newContent.ceoGreeting } : {}),
+                };
+              }
+              if (sec.id === 'sec-intro-image' && newContent.ceoImageUrl !== undefined) {
+                return { ...sec, imageUrl: newContent.ceoImageUrl };
+              }
+              if (sec.id === 'sec-intro-signature' || sec.type === 'signature') {
+                return {
+                  ...sec,
+                  ...(newContent.ceoRole !== undefined ? { authorRole: newContent.ceoRole } : {}),
+                  ...(newContent.ceoName !== undefined ? { authorName: newContent.ceoName } : {}),
+                  ...(newContent.ceoSignatureImage !== undefined ? { signatureImageUrl: newContent.ceoSignatureImage } : {}),
+                };
+              }
+              if (sec.id === 'sec-intro-ceo') {
+                return {
+                  ...sec,
+                  ...(newContent.ceoTitle !== undefined ? { title: newContent.ceoTitle } : {}),
+                  ...(newContent.ceoSubtitle !== undefined ? { subtitle: newContent.ceoSubtitle } : {}),
+                  ...(newContent.ceoGreeting !== undefined ? { content: newContent.ceoGreeting } : {}),
+                  ...(newContent.ceoImageUrl !== undefined ? { imageUrl: newContent.ceoImageUrl } : {}),
+                };
+              }
+              return sec;
+            });
+          }
+        });
+        mergedContent.pageSections = nextPageSections;
+      }
+
+      return {
+        ...prev,
+        content: mergedContent
+      };
+    });
     showToast('사이트 콘텐츠가 성공적으로 저장되었습니다.');
   };
 

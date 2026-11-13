@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ProductItem } from '../types';
+import {
+  getProductBadges,
+  getProductSpecItems,
+  getVisibleSpecByKey,
+  getBadgeColorClass,
+  renderBadgeIcon
+} from '../utils/productUtils';
 import { 
   Package, 
   Sparkles, 
@@ -69,13 +76,13 @@ export const ProductsPage: React.FC = () => {
         <div className="relative z-10 text-center max-w-4xl mx-auto px-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#872D35]/80 text-white text-xs font-bold mb-3 backdrop-blur-xs border border-white/20">
             <Package className="w-3.5 h-3.5 text-amber-300" />
-            <span>FOOD HOME PRODUCTS CATALOG</span>
+            <span>{state.content.productsPageBadge || 'FOOD HOME PRODUCTS CATALOG'}</span>
           </div>
           <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight drop-shadow-md">
-            FOOD HOME 제품소개
+            {state.content.productsPageTitle || 'FOOD HOME 제품소개'}
           </h1>
           <p className="mt-3 text-sm sm:text-lg text-stone-200 font-medium max-w-2xl mx-auto drop-shadow-sm">
-            물 생김 없는 특허 수분제어와 30년 전통 비법 양념의 명품 보쌈김치 라인업
+            {state.content.productsPageSubtitle || '물 생김 없는 특허 수분제어와 30년 전통 비법 양념의 명품 보쌈김치 라인업'}
           </p>
         </div>
       </section>
@@ -118,7 +125,7 @@ export const ProductsPage: React.FC = () => {
           <p className="text-xs sm:text-sm text-stone-500 font-medium">
             총 <span className="font-extrabold text-stone-900">{filteredProducts.length}</span>개의 제품이 준비되어 있습니다.
           </p>
-          <span className="text-xs text-stone-400 font-bold">100% 국산 농산물 원료 사용</span>
+          <span className="text-xs text-stone-400 font-bold">{state.content.productsPageNotice || '100% 국산 농산물 원료 사용'}</span>
         </div>
 
         {/* Product Grid */}
@@ -144,25 +151,33 @@ export const ProductsPage: React.FC = () => {
                   }}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 select-none"
                 />
-                <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
-                  <span className="px-2.5 py-1 rounded-full bg-[#872D35] text-white text-[11px] font-black shadow-xs">
-                    {product.tag}
-                  </span>
-                  {product.isPopular && (
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-extrabold flex items-center gap-0.5 shadow-xs">
-                      <Flame className="w-3 h-3" /> 인기
-                    </span>
-                  )}
-                  {product.isRecommended && (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-0.5 shadow-xs">
-                      <Award className="w-3 h-3" /> 추천
-                    </span>
-                  )}
-                </div>
+                {(() => {
+                  const visibleBadges = getProductBadges(product).filter(b => b.visible && b.text?.trim());
+                  if (visibleBadges.length === 0) return null;
+                  return (
+                    <div className="absolute top-3 left-3 right-3 flex flex-wrap gap-1.5">
+                      {visibleBadges.map(badge => (
+                        <span
+                          key={badge.id}
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-black flex items-center gap-1 shadow-xs ${getBadgeColorClass(badge.color)}`}
+                        >
+                          {renderBadgeIcon(badge.icon, 'w-3 h-3')}
+                          <span>{badge.text}</span>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
 
-                <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-xs text-white text-[11px] font-bold">
-                  {product.weight}
-                </div>
+                {(() => {
+                  const weightSpec = getVisibleSpecByKey(product, 'weight');
+                  if (!weightSpec) return null;
+                  return (
+                    <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-xs text-white text-[11px] font-bold">
+                      {weightSpec.value}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Product Info */}
@@ -183,21 +198,29 @@ export const ProductsPage: React.FC = () => {
                     {product.description}
                   </p>
 
-                  {/* Quick Specs Pill */}
-                  <div className="bg-stone-50 rounded-xl p-3 border border-stone-100 space-y-1.5 text-xs text-stone-600 mb-4">
-                    <div className="flex justify-between">
-                      <span className="text-stone-400 font-semibold">보관방법:</span>
-                      <span className="font-bold text-stone-800">{product.storage}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-400 font-semibold">소비기한:</span>
-                      <span className="font-bold text-stone-800">{product.shelfLife}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-stone-400 font-semibold">납품단가:</span>
-                      <span className="font-bold text-[#872D35]">{product.bulkPriceGuide}</span>
-                    </div>
-                  </div>
+                  {/* Quick Specs Pill (Respects visibility & renamed labels) */}
+                  {(() => {
+                    const cardSpecs = getProductSpecItems(product)
+                      .filter(s => s.visible && s.value?.trim() && (s.key === 'storage' || s.key === 'shelfLife'));
+                    const showWholesale = product.wholesalePriceBoxVisible !== false && product.bulkPriceGuide?.trim();
+                    if (cardSpecs.length === 0 && !showWholesale) return null;
+                    return (
+                      <div className="bg-stone-50 rounded-xl p-3 border border-stone-100 space-y-1.5 text-xs text-stone-600 mb-4">
+                        {cardSpecs.map(spec => (
+                          <div key={spec.id} className="flex justify-between gap-2">
+                            <span className="text-stone-400 font-semibold shrink-0">{spec.label}:</span>
+                            <span className="font-bold text-stone-800 truncate">{spec.value}</span>
+                          </div>
+                        ))}
+                        {showWholesale && (
+                          <div className="flex justify-between gap-2">
+                            <span className="text-stone-400 font-semibold shrink-0">납품단가:</span>
+                            <span className="font-bold text-[#872D35] truncate">{product.bulkPriceGuide}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Actions */}
@@ -229,17 +252,17 @@ export const ProductsPage: React.FC = () => {
           <div className="space-y-3 max-w-2xl">
             <span className="text-xs font-extrabold text-[#E8B4B8] tracking-widest uppercase">B2B PARTNERSHIP</span>
             <h3 className="text-2xl sm:text-3xl font-black">
-              프랜차이즈 및 대량 납품 맞춤형 OEM/PB 상담
+              {state.content.productsBannerTitle || '프랜차이즈 및 대량 납품 맞춤형 OEM/PB 상담'}
             </h3>
             <p className="text-xs sm:text-sm text-stone-300 leading-relaxed">
-              매장별 맞춤 염도, 단맛 조절, 전용 라벨링 포장 및 전국 직송 물류 견적을 1:1 전담 매니저가 친절하게 상담해 드립니다.
+              {state.content.productsBannerDesc || '매장별 맞춤 염도, 단맛 조절, 전용 라벨링 포장 및 전국 직송 물류 견적을 1:1 전담 매니저가 친절하게 상담해 드립니다.'}
             </p>
           </div>
           <button
             onClick={() => setIsWholesaleModalOpen(true)}
             className="shrink-0 px-8 py-4 rounded-2xl bg-[#872D35] hover:bg-[#9E2A2B] text-white font-black text-sm shadow-xl flex items-center gap-2 cursor-pointer transition-transform hover:scale-105"
           >
-            <span>대량 납품 견적서 요청하기</span>
+            <span>{state.content.productsBannerBtnText || '대량 납품 견적서 요청하기'}</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

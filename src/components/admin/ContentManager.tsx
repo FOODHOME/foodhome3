@@ -6,8 +6,19 @@ import {
   CompanySubpageItem, 
   HistoryItem, 
   ProcessStepItem, 
-  WholesaleStepItem 
+  WholesaleStepItem,
+  ProductSpecItem,
+  ProductBadgeItem,
+  ProductFeatureCardItem
 } from '../../types';
+import { 
+  getProductSpecItems, 
+  getProductBadges, 
+  getProductFeatureCards, 
+  getBadgeColorClass, 
+  renderBadgeIcon, 
+  renderFeatureIcon 
+} from '../../utils/productUtils';
 import { uploadImageToStorage } from '../../lib/supabase';
 import { SectionManager } from './SectionManager';
 import { getDefaultPageSections, getDefaultProductSections } from '../../data/defaultPageSections';
@@ -42,7 +53,13 @@ import {
   Clock,
   Thermometer,
   Phone,
-  CheckCircle2
+  CheckCircle2,
+  Flame,
+  Star,
+  Zap,
+  Undo2,
+  Tag,
+  Palette
 } from 'lucide-react';
 
 export const ContentManager: React.FC = () => {
@@ -71,6 +88,12 @@ export const ContentManager: React.FC = () => {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [productPreviewMode, setProductPreviewMode] = useState<'none' | 'card' | 'modal'>('card');
   const [productSubTab, setProductSubTab] = useState<'items' | 'categories'>('items');
+  const [editingSpecId, setEditingSpecId] = useState<string | null>(null);
+  const [undoSnapshot, setUndoSnapshot] = useState<{
+    productId: string;
+    prevProduct: ProductItem;
+    label: string;
+  } | null>(null);
 
   // Local form for general site content
   const [contentForm, setContentForm] = useState(state.content);
@@ -173,6 +196,201 @@ export const ContentManager: React.FC = () => {
   const handleUpdateCurrentProduct = (fields: Partial<ProductItem>) => {
     if (!currentProduct) return;
     updateProduct(currentProduct.id, fields);
+  };
+
+  // Dynamic Spec Item Handlers (preserving existing fields & values)
+  const syncLegacyFieldsFromSpecs = (specs: ProductSpecItem[]): Partial<ProductItem> => {
+    const patch: Partial<ProductItem> = {};
+    const legacyKeys: Array<keyof ProductItem> = [
+      'weight',
+      'storage',
+      'shelfLife',
+      'ingredients',
+      'origin',
+      'packagingType',
+      'minOrder',
+      'deliveryInfo'
+    ];
+    legacyKeys.forEach((k) => {
+      const found = specs.find(s => s.key === k);
+      if (found) {
+        (patch as any)[k] = found.value;
+      }
+    });
+    return patch;
+  };
+
+  const handleSpecValueChange = (specId: string, newValue: string) => {
+    if (!currentProduct) return;
+    const curSpecs = getProductSpecItems(currentProduct);
+    const nextSpecs = curSpecs.map(s => s.id === specId ? { ...s, value: newValue } : s);
+    const legacyPatch = syncLegacyFieldsFromSpecs(nextSpecs);
+    handleUpdateCurrentProduct({ ...legacyPatch, specItems: nextSpecs });
+  };
+
+  const handleSpecLabelChange = (specId: string, newLabel: string) => {
+    if (!currentProduct) return;
+    const curSpecs = getProductSpecItems(currentProduct);
+    const nextSpecs = curSpecs.map(s => s.id === specId ? { ...s, label: newLabel } : s);
+    handleUpdateCurrentProduct({ specItems: nextSpecs });
+  };
+
+  const handleToggleSpecVisible = (specId: string) => {
+    if (!currentProduct) return;
+    const curSpecs = getProductSpecItems(currentProduct);
+    const nextSpecs = curSpecs.map(s => s.id === specId ? { ...s, visible: !s.visible } : s);
+    handleUpdateCurrentProduct({ specItems: nextSpecs });
+  };
+
+  const handleMoveSpecItem = (idx: number, direction: 'up' | 'down') => {
+    if (!currentProduct) return;
+    const curSpecs = [...getProductSpecItems(currentProduct)];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= curSpecs.length) return;
+    const [moved] = curSpecs.splice(idx, 1);
+    curSpecs.splice(targetIdx, 0, moved);
+    const reordered = curSpecs.map((s, i) => ({ ...s, order: i + 1 }));
+    handleUpdateCurrentProduct({ specItems: reordered });
+  };
+
+  const handleDeleteSpecItem = (spec: ProductSpecItem) => {
+    if (!currentProduct) return;
+    if (!confirm(`'${spec.label || '항목'}'을(를) 정말 삭제하시겠습니까?\n(잠시 숨기려면 눈 모양 아이콘을 사용하세요.)`)) return;
+    const prevSnapshot: ProductItem = JSON.parse(JSON.stringify(currentProduct));
+    const curSpecs = getProductSpecItems(currentProduct);
+    const nextSpecs = curSpecs
+      .filter(s => s.id !== spec.id)
+      .map((s, i) => ({ ...s, order: i + 1 }));
+    handleUpdateCurrentProduct({ specItems: nextSpecs });
+    setUndoSnapshot({
+      productId: currentProduct.id,
+      prevProduct: prevSnapshot,
+      label: `스펙 항목 '${spec.label}'`
+    });
+  };
+
+  const handleAddSpecItem = () => {
+    if (!currentProduct) return;
+    const curSpecs = getProductSpecItems(currentProduct);
+    const newId = 'spec-' + Date.now();
+    const newSpec: ProductSpecItem = {
+      id: newId,
+      key: 'custom',
+      label: '새 규격 항목',
+      value: '',
+      visible: true,
+      order: curSpecs.length + 1
+    };
+    handleUpdateCurrentProduct({ specItems: [...curSpecs, newSpec] });
+    setEditingSpecId(newId);
+  };
+
+  // Multi-Badge Handlers
+  const syncBadgesUpdate = (nextBadges: ProductBadgeItem[]) => {
+    if (!currentProduct) return;
+    const firstVisible = nextBadges.find(b => b.visible && b.text.trim());
+    const popBadge = nextBadges.find(b => b.id === 'badge-popular');
+    const recBadge = nextBadges.find(b => b.id === 'badge-recommended');
+    handleUpdateCurrentProduct({
+      badges: nextBadges,
+      tag: firstVisible ? firstVisible.text : '',
+      ...(popBadge ? { isPopular: popBadge.visible } : {}),
+      ...(recBadge ? { isRecommended: recBadge.visible } : {})
+    });
+  };
+
+  const handleAddBadge = () => {
+    if (!currentProduct) return;
+    const cur = getProductBadges(currentProduct);
+    const next: ProductBadgeItem[] = [
+      ...cur,
+      {
+        id: 'badge-' + Date.now(),
+        text: '새 배지',
+        visible: true,
+        color: 'burgundy',
+        icon: 'sparkles',
+        order: cur.length + 1
+      }
+    ];
+    syncBadgesUpdate(next);
+  };
+
+  const handleDeleteBadge = (badge: ProductBadgeItem) => {
+    if (!currentProduct) return;
+    if (!confirm(`'${badge.text || '배지'}' 배지를 삭제하시겠습니까?`)) return;
+    const prevSnapshot: ProductItem = JSON.parse(JSON.stringify(currentProduct));
+    const cur = getProductBadges(currentProduct);
+    const next = cur
+      .filter(b => b.id !== badge.id)
+      .map((b, i) => ({ ...b, order: i + 1 }));
+    syncBadgesUpdate(next);
+    setUndoSnapshot({
+      productId: currentProduct.id,
+      prevProduct: prevSnapshot,
+      label: `배지 '${badge.text}'`
+    });
+  };
+
+  const handleMoveBadge = (idx: number, direction: 'up' | 'down') => {
+    if (!currentProduct) return;
+    const cur = [...getProductBadges(currentProduct)];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= cur.length) return;
+    const [moved] = cur.splice(idx, 1);
+    cur.splice(targetIdx, 0, moved);
+    syncBadgesUpdate(cur.map((b, i) => ({ ...b, order: i + 1 })));
+  };
+
+  // Feature Card Handlers
+  const handleAddFeatureCard = () => {
+    if (!currentProduct) return;
+    const cur = getProductFeatureCards(currentProduct);
+    const next: ProductFeatureCardItem[] = [
+      ...cur,
+      {
+        id: 'fc-' + Date.now(),
+        title: '새 핵심 특징',
+        desc: '특징 설명 입력',
+        icon: 'Sparkles',
+        visible: true,
+        order: cur.length + 1
+      }
+    ];
+    handleUpdateCurrentProduct({ featureCards: next });
+  };
+
+  const handleDeleteFeatureCard = (card: ProductFeatureCardItem) => {
+    if (!currentProduct) return;
+    if (!confirm(`'${card.title || '특징 카드'}' 카드를 삭제하시겠습니까?`)) return;
+    const prevSnapshot: ProductItem = JSON.parse(JSON.stringify(currentProduct));
+    const cur = getProductFeatureCards(currentProduct);
+    const next = cur
+      .filter(c => c.id !== card.id)
+      .map((c, i) => ({ ...c, order: i + 1 }));
+    handleUpdateCurrentProduct({ featureCards: next });
+    setUndoSnapshot({
+      productId: currentProduct.id,
+      prevProduct: prevSnapshot,
+      label: `특징 카드 '${card.title}'`
+    });
+  };
+
+  const handleMoveFeatureCard = (idx: number, direction: 'up' | 'down') => {
+    if (!currentProduct) return;
+    const cur = [...getProductFeatureCards(currentProduct)];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= cur.length) return;
+    const [moved] = cur.splice(idx, 1);
+    cur.splice(targetIdx, 0, moved);
+    handleUpdateCurrentProduct({ featureCards: cur.map((c, i) => ({ ...c, order: i + 1 })) });
+  };
+
+  const handleUndoProductChange = () => {
+    if (!undoSnapshot) return;
+    updateProduct(undoSnapshot.productId, undoSnapshot.prevProduct);
+    showToast(`${undoSnapshot.label} 삭제를 실행 취소하여 복원했습니다.`);
+    setUndoSnapshot(null);
   };
 
   const handleCreateNewProduct = () => {
@@ -631,11 +849,41 @@ export const ContentManager: React.FC = () => {
                         />
                         <button
                           type="button"
+                          disabled={idx === 0}
                           onClick={() => {
+                            const updated = [...(contentForm.systemSteps || [])];
+                            const [moved] = updated.splice(idx, 1);
+                            updated.splice(idx - 1, 0, moved);
+                            handleFieldChange('systemSteps', updated);
+                          }}
+                          className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 cursor-pointer text-xs"
+                          title="위로"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          disabled={idx === (contentForm.systemSteps || []).length - 1}
+                          onClick={() => {
+                            const updated = [...(contentForm.systemSteps || [])];
+                            const [moved] = updated.splice(idx, 1);
+                            updated.splice(idx + 1, 0, moved);
+                            handleFieldChange('systemSteps', updated);
+                          }}
+                          className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 cursor-pointer text-xs"
+                          title="아래로"
+                        >
+                          ▼
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!confirm(`'${step.title}' 단계를 삭제하시겠습니까?`)) return;
                             const updated = (contentForm.systemSteps || []).filter((_, i) => i !== idx);
                             handleFieldChange('systemSteps', updated);
                           }}
                           className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                          title="삭제"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -723,11 +971,41 @@ export const ContentManager: React.FC = () => {
                           />
                           <button
                             type="button"
+                            disabled={idx === 0}
                             onClick={() => {
+                              const updated = [...(contentForm.permitsList || [])];
+                              const [moved] = updated.splice(idx, 1);
+                              updated.splice(idx - 1, 0, moved);
+                              handleFieldChange('permitsList', updated);
+                            }}
+                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 cursor-pointer text-xs"
+                            title="위로"
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === (contentForm.permitsList || []).length - 1}
+                            onClick={() => {
+                              const updated = [...(contentForm.permitsList || [])];
+                              const [moved] = updated.splice(idx, 1);
+                              updated.splice(idx + 1, 0, moved);
+                              handleFieldChange('permitsList', updated);
+                            }}
+                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-20 cursor-pointer text-xs"
+                            title="아래로"
+                          >
+                            ▼
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!confirm(`'${cert.title}' 인허가 항목을 삭제하시겠습니까?`)) return;
                               const updated = (contentForm.permitsList || []).filter((_, i) => i !== idx);
                               handleFieldChange('permitsList', updated);
                             }}
                             className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                            title="삭제"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -962,7 +1240,7 @@ export const ContentManager: React.FC = () => {
                       className="w-12 h-12 rounded-xl object-cover border border-stone-200"
                     />
                     <div>
-                      <span className="text-[10px] font-black text-[#872D35] uppercase tracking-wider block">
+                      <span className="text-[11px] font-black text-[#872D35] uppercase tracking-wider block">
                         {currentProduct.category}
                       </span>
                       <h4 className="text-base font-black text-stone-900">
@@ -971,33 +1249,60 @@ export const ContentManager: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    {/* Move order buttons */}
+                  <div className="flex items-center gap-1.5">
                     <button
+                      type="button"
                       onClick={() => handleMoveProductOrder('up')}
-                      className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs font-bold hover:bg-stone-100 cursor-pointer"
-                      title="제품 순서 위로 이동"
+                      className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-bold cursor-pointer"
+                      title="노출 순서 위로"
                     >
                       ▲ 위로
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleMoveProductOrder('down')}
-                      className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs font-bold hover:bg-stone-100 cursor-pointer"
-                      title="제품 순서 아래로 이동"
+                      className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 text-xs font-bold cursor-pointer"
+                      title="노출 순서 아래로"
                     >
                       ▼ 아래로
                     </button>
-
-                    {/* Delete button */}
                     <button
+                      type="button"
                       onClick={handleDeleteCurrentProduct}
-                      className="p-2 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
+                      className="p-2 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 cursor-pointer"
                       title="제품 삭제"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
+
+                {/* Undo Bar when deleting specs / badges / cards */}
+                {undoSnapshot && undoSnapshot.productId === currentProduct.id && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 flex items-center justify-between gap-2 text-xs">
+                    <span className="font-bold text-amber-900">
+                      {undoSnapshot.label}이(가) 삭제되었습니다. 실수로 삭제한 경우 복구할 수 있습니다.
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleUndoProductChange}
+                        className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-black flex items-center gap-1 cursor-pointer"
+                      >
+                        <Undo2 className="w-3.5 h-3.5" />
+                        <span>실행 취소</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUndoSnapshot(null)}
+                        className="p-1 rounded text-amber-700 hover:bg-amber-100 cursor-pointer"
+                        title="닫기"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* 18개 수정 가능 항목 입력 폼 */}
                 <div className="space-y-4">
@@ -1080,22 +1385,9 @@ export const ContentManager: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* ⑬ 배지 및 강조 문구 & 부제목 */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* 제품 한 줄 소개 문구 (부제목) & ⑬ 제품 배지 / 태그 관리 (모든 배지 개별 편집/추가/삭제/숨김/색상/순서) */}
+                  <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        ⑬ 제품 배지 / 태그 문구
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.tag || ''}
-                        onChange={(e) => handleUpdateCurrentProduct({ tag: e.target.value })}
-                        placeholder="예: BEST B2B 1위"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-bold text-[#872D35]"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
                       <label className="block text-xs font-bold text-stone-700 mb-1">
                         제품 한 줄 소개 문구 (부제목)
                       </label>
@@ -1106,6 +1398,135 @@ export const ContentManager: React.FC = () => {
                         placeholder="예: 30년 전통 비법과 특허 수분제어 공법의 시그니처"
                         className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
                       />
+                    </div>
+
+                    <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+                          <Tag className="w-3.5 h-3.5 text-[#872D35]" />
+                          <span>⑬ 제품 이미지 배지 / 태그 관리 ({getProductBadges(currentProduct).length}개)</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleAddBadge}
+                          className="px-2.5 py-1 rounded-lg bg-[#872D35] hover:bg-[#6D242B] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>배지 추가</span>
+                        </button>
+                      </div>
+
+                      {getProductBadges(currentProduct).length === 0 ? (
+                        <p className="text-[11px] text-stone-400 text-center py-2">
+                          등록된 배지가 없습니다. 상단 [+ 배지 추가] 버튼으로 새 배지를 추가할 수 있습니다.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {getProductBadges(currentProduct).map((badge, bIdx, arr) => (
+                            <div
+                              key={badge.id}
+                              className={`flex flex-wrap items-center gap-2 p-2 rounded-xl border bg-white ${
+                                badge.visible ? 'border-stone-200' : 'border-stone-200 opacity-60 bg-stone-50/70'
+                              }`}
+                            >
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-black flex items-center gap-1 shrink-0 ${getBadgeColorClass(badge.color)}`}
+                              >
+                                {renderBadgeIcon(badge.icon, 'w-3 h-3')}
+                                <span>{badge.text || '미리보기'}</span>
+                              </span>
+
+                              <input
+                                type="text"
+                                value={badge.text}
+                                onChange={(e) => {
+                                  const next = arr.map(b => b.id === badge.id ? { ...b, text: e.target.value } : b);
+                                  syncBadgesUpdate(next);
+                                }}
+                                placeholder="배지 문구 입력"
+                                className="flex-1 min-w-[110px] px-2.5 py-1 rounded-lg border border-stone-200 text-xs font-bold text-stone-800 bg-white"
+                              />
+
+                              <select
+                                value={badge.color || 'burgundy'}
+                                onChange={(e) => {
+                                  const next = arr.map(b => b.id === badge.id ? { ...b, color: e.target.value } : b);
+                                  syncBadgesUpdate(next);
+                                }}
+                                className="px-2 py-1 rounded-lg border border-stone-200 text-[11px] bg-white font-semibold"
+                                title="배지 색상"
+                              >
+                                <option value="burgundy">버건디</option>
+                                <option value="amber">앰버(주황)</option>
+                                <option value="emerald">에메랄드</option>
+                                <option value="blue">블루</option>
+                                <option value="purple">퍼플</option>
+                                <option value="slate">슬레이트</option>
+                                <option value="dark">다크브라운</option>
+                              </select>
+
+                              <select
+                                value={badge.icon || 'none'}
+                                onChange={(e) => {
+                                  const next = arr.map(b => b.id === badge.id ? { ...b, icon: e.target.value } : b);
+                                  syncBadgesUpdate(next);
+                                }}
+                                className="px-2 py-1 rounded-lg border border-stone-200 text-[11px] bg-white font-semibold"
+                                title="배지 아이콘"
+                              >
+                                <option value="none">아이콘 없음</option>
+                                <option value="flame">불꽃 (인기)</option>
+                                <option value="award">어워드 (추천)</option>
+                                <option value="sparkles">반짝임</option>
+                                <option value="check">체크</option>
+                                <option value="shield">방패 (안전)</option>
+                                <option value="star">별표</option>
+                                <option value="zap">번개</option>
+                              </select>
+
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = arr.map(b => b.id === badge.id ? { ...b, visible: !b.visible } : b);
+                                    syncBadgesUpdate(next);
+                                  }}
+                                  className={`p-1 rounded cursor-pointer ${badge.visible ? 'text-emerald-600 hover:bg-emerald-50' : 'text-stone-400 hover:bg-stone-100'}`}
+                                  title={badge.visible ? '표시 중 (클릭 시 숨김)' : '숨김 상태 (클릭 시 표시)'}
+                                >
+                                  {badge.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={bIdx === 0}
+                                  onClick={() => handleMoveBadge(bIdx, 'up')}
+                                  className="p-1 rounded text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                                  title="앞으로 이동"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={bIdx === arr.length - 1}
+                                  onClick={() => handleMoveBadge(bIdx, 'down')}
+                                  className="p-1 rounded text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                                  title="뒤로 이동"
+                                >
+                                  ▼
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBadge(badge)}
+                                  className="p-1 rounded text-stone-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                  title="배지 삭제"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1175,140 +1596,419 @@ export const ContentManager: React.FC = () => {
                     />
                   </div>
 
-                  {/* ⑧ 포장 중량, ⑨ 보관 방법, ⑩ 소비기한 */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-stone-100">
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        ⑧ 포장 중량
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.weight}
-                        onChange={(e) => handleUpdateCurrentProduct({ weight: e.target.value })}
-                        placeholder="예: 1kg / 5kg / 10kg"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-semibold"
-                      />
+                  {/* ⑧~⑪ 기존 제품 정보 입력칸 개선 (항목명 수정 · 표시/숨김 · 순서변경 · 삭제 · 항목 추가) */}
+                  <div className="pt-3 border-t border-stone-100 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-black text-stone-800 block">
+                          ⑧~⑪ 제품 규격 · 보관 · 원재료 및 상세 정보 항목
+                        </span>
+                        <span className="text-[11px] text-stone-400">
+                          항목명 옆 연필(✏️)로 이름 수정, 눈(👁️)으로 숨김 시 입력값은 유지되며 홈페이지에서 해당 줄만 가려집니다.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddSpecItem}
+                        className="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-black text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>항목 추가</span>
+                      </button>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        ⑨ 보관 방법
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.storage}
-                        onChange={(e) => handleUpdateCurrentProduct({ storage: e.target.value })}
-                        placeholder="예: 0~10℃ 냉장보관"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-semibold"
-                      />
+                    <div className="space-y-2.5">
+                      {getProductSpecItems(currentProduct).map((spec, sIdx, specArr) => {
+                        const isEditingLabel = editingSpecId === spec.id;
+                        const isMultiline = spec.key === 'ingredients' || (spec.value && spec.value.includes('\n')) || (spec.value && spec.value.length > 65);
+
+                        return (
+                          <div
+                            key={spec.id}
+                            className={`p-3 rounded-xl border transition-all ${
+                              spec.visible
+                                ? 'bg-white border-stone-200'
+                                : 'bg-stone-50 border-stone-200/80 opacity-65'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              {/* Label or Inline Label Input */}
+                              <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                {isEditingLabel ? (
+                                  <div className="flex items-center gap-1 flex-1 max-w-xs">
+                                    <input
+                                      type="text"
+                                      autoFocus
+                                      value={spec.label}
+                                      onChange={(e) => handleSpecLabelChange(spec.id, e.target.value)}
+                                      onBlur={() => setEditingSpecId(null)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === 'Escape') {
+                                          e.preventDefault();
+                                          setEditingSpecId(null);
+                                        }
+                                      }}
+                                      placeholder="항목명 입력"
+                                      className="flex-1 px-2 py-0.5 text-xs font-bold border border-[#872D35] rounded-md bg-white focus:outline-none"
+                                    />
+                                    <button
+                                      type="button"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        setEditingSpecId(null);
+                                      }}
+                                      className="p-1 rounded bg-[#872D35] text-white cursor-pointer"
+                                      title="항목명 확정"
+                                    >
+                                      <Check className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <label className="text-xs font-bold text-stone-700 truncate">
+                                      {spec.label}
+                                    </label>
+                                    {!spec.visible && (
+                                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 shrink-0">
+                                        숨김됨
+                                      </span>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                              {/* Inline Action Icons: ✏️ 👁️ ▲ ▼ 🗑️ */}
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSpecId(isEditingLabel ? null : spec.id)}
+                                  className={`p-1 rounded hover:bg-stone-100 cursor-pointer ${
+                                    isEditingLabel ? 'text-[#872D35] bg-[#872D35]/10' : 'text-stone-400 hover:text-[#872D35]'
+                                  }`}
+                                  title="항목명 수정"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSpecVisible(spec.id)}
+                                  className={`p-1 rounded cursor-pointer ${
+                                    spec.visible
+                                      ? 'text-emerald-600 hover:bg-emerald-50'
+                                      : 'text-stone-400 hover:bg-stone-200'
+                                  }`}
+                                  title={spec.visible ? '홈페이지에 표시 중 (클릭 시 숨김)' : '숨김 상태 (클릭 시 다시 표시)'}
+                                >
+                                  {spec.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={sIdx === 0}
+                                  onClick={() => handleMoveSpecItem(sIdx, 'up')}
+                                  className="p-1 rounded text-stone-400 hover:text-stone-800 hover:bg-stone-100 disabled:opacity-20 cursor-pointer text-[11px]"
+                                  title="위로 이동"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={sIdx === specArr.length - 1}
+                                  onClick={() => handleMoveSpecItem(sIdx, 'down')}
+                                  className="p-1 rounded text-stone-400 hover:text-stone-800 hover:bg-stone-100 disabled:opacity-20 cursor-pointer text-[11px]"
+                                  title="아래로 이동"
+                                >
+                                  ▼
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSpecItem(spec)}
+                                  className="p-1 rounded text-stone-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                  title="항목 삭제"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {isMultiline ? (
+                              <textarea
+                                rows={2}
+                                value={spec.value}
+                                onChange={(e) => handleSpecValueChange(spec.id, e.target.value)}
+                                placeholder={`${spec.label} 내용을 입력하세요`}
+                                className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-semibold"
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                value={spec.value}
+                                onChange={(e) => handleSpecValueChange(spec.id, e.target.value)}
+                                placeholder={`${spec.label} 내용을 입력하세요`}
+                                className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-semibold"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        ⑩ 소비기한 / 유통기한
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.shelfLife}
-                        onChange={(e) => handleUpdateCurrentProduct({ shelfLife: e.target.value })}
-                        placeholder="예: 제조일로부터 30일"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-semibold"
-                      />
+                    <button
+                      type="button"
+                      onClick={handleAddSpecItem}
+                      className="w-full py-2 rounded-xl border border-dashed border-stone-300 hover:border-[#872D35] text-stone-600 hover:text-[#872D35] bg-stone-50/70 hover:bg-[#872D35]/5 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>항목 추가</span>
+                    </button>
+                  </div>
+
+                  {/* 제품 대표 이미지 하단 특징 카드 관리 */}
+                  <div className="pt-3 border-t border-stone-100 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-black text-stone-800 block">
+                          제품 대표 이미지 하단 특징 카드 ({getProductFeatureCards(currentProduct).length}개)
+                        </span>
+                        <span className="text-[11px] text-stone-400">
+                          상세페이지 대표 이미지 아래 표시되는 강점 카드의 아이콘·제목·설명·표시여부·개수를 관리합니다.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddFeatureCard}
+                        className="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-black text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>카드 추가</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {getProductFeatureCards(currentProduct).map((card, cIdx, cardArr) => (
+                        <div
+                          key={card.id}
+                          className={`p-3 rounded-xl border space-y-2 ${
+                            card.visible ? 'bg-stone-50/60 border-stone-200' : 'bg-stone-100/70 border-stone-200 opacity-60'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="p-1 rounded-md bg-white border border-stone-200">
+                                {renderFeatureIcon(card.icon, 'w-3.5 h-3.5 text-[#872D35]')}
+                              </span>
+                              <select
+                                value={card.icon || 'Sparkles'}
+                                onChange={(e) => {
+                                  const next = cardArr.map(c => c.id === card.id ? { ...c, icon: e.target.value } : c);
+                                  handleUpdateCurrentProduct({ featureCards: next });
+                                }}
+                                className="px-2 py-1 rounded-lg border border-stone-200 text-[11px] bg-white font-semibold"
+                              >
+                                <option value="Sparkles">반짝임(특허)</option>
+                                <option value="CheckCircle2">체크원(원물)</option>
+                                <option value="ShieldCheck">안전방패(위생)</option>
+                                <option value="Truck">트럭(배송)</option>
+                                <option value="Award">어워드(인증)</option>
+                                <option value="Flame">불꽃(인기)</option>
+                                <option value="Clock">시계(신선)</option>
+                                <option value="Package">박스(포장)</option>
+                                <option value="Layers">레이어(구성)</option>
+                                <option value="Thermometer">온도계(냉장)</option>
+                              </select>
+                            </div>
+
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = cardArr.map(c => c.id === card.id ? { ...c, visible: !c.visible } : c);
+                                  handleUpdateCurrentProduct({ featureCards: next });
+                                }}
+                                className={`p-1 rounded cursor-pointer ${card.visible ? 'text-emerald-600' : 'text-stone-400'}`}
+                                title={card.visible ? '표시 중' : '숨김 상태'}
+                              >
+                                {card.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={cIdx === 0}
+                                onClick={() => handleMoveFeatureCard(cIdx, 'up')}
+                                className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                              >
+                                ▲
+                              </button>
+                              <button
+                                type="button"
+                                disabled={cIdx === cardArr.length - 1}
+                                onClick={() => handleMoveFeatureCard(cIdx, 'down')}
+                                className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                              >
+                                ▼
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteFeatureCard(card)}
+                                className="p-1 text-stone-400 hover:text-red-600 cursor-pointer"
+                                title="카드 삭제"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              value={card.title}
+                              onChange={(e) => {
+                                const next = cardArr.map(c => c.id === card.id ? { ...c, title: e.target.value } : c);
+                                handleUpdateCurrentProduct({ featureCards: next });
+                              }}
+                              placeholder="카드 제목"
+                              className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs font-bold bg-white"
+                            />
+                            <input
+                              type="text"
+                              value={card.desc}
+                              onChange={(e) => {
+                                const next = cardArr.map(c => c.id === card.id ? { ...c, desc: e.target.value } : c);
+                                handleUpdateCurrentProduct({ featureCards: next });
+                              }}
+                              placeholder="카드 부설명"
+                              className="px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white"
+                            />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  {/* ⑪ 원재료 및 함량 */}
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1">
-                      ⑪ 원재료 및 함량
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={currentProduct.ingredients}
-                      onChange={(e) => handleUpdateCurrentProduct({ ingredients: e.target.value })}
-                      placeholder="예: 절임무 80%(국내산), 고춧가루(국내산), 마늘, 생강, 멸치액젓..."
-                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
-                    />
-                  </div>
+                  {/* ⑫ 납품 관련 안내 & ⑭ 제품 버튼 문구 + 상세 고정 문구 */}
+                  <div className="space-y-3 pt-3 border-t border-stone-100">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1">
+                          ⑫ 납품 단가 안내 문구
+                        </label>
+                        <input
+                          type="text"
+                          value={currentProduct.bulkPriceGuide}
+                          onChange={(e) => handleUpdateCurrentProduct({ bulkPriceGuide: e.target.value })}
+                          placeholder="예: 외식업 사업자 회원 전용 도매 단가 제공"
+                          className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                        />
+                      </div>
 
-                  {/* ⑫ 납품 관련 안내 & ⑭ 제품 버튼 문구 */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-stone-100">
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        ⑫ 납품 단가 안내 문구
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.bulkPriceGuide}
-                        onChange={(e) => handleUpdateCurrentProduct({ bulkPriceGuide: e.target.value })}
-                        placeholder="예: 외식업 사업자 회원 전용 도매 단가 제공"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
-                      />
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1">
+                          ⑭ 제품 신청 버튼 문구
+                        </label>
+                        <input
+                          type="text"
+                          value={currentProduct.buttonText || '무료 샘플 1kg 신청'}
+                          onChange={(e) => handleUpdateCurrentProduct({ buttonText: e.target.value })}
+                          placeholder="예: 무료 샘플 1kg 신청"
+                          className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-bold text-[#872D35]"
+                        />
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        ⑭ 제품 신청 버튼 문구
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.buttonText || '무료 샘플 1kg 신청'}
-                        onChange={(e) => handleUpdateCurrentProduct({ buttonText: e.target.value })}
-                        placeholder="예: 무료 샘플 1kg 신청"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-bold text-[#872D35]"
-                      />
-                    </div>
-                  </div>
+                    {/* 도매 박스 & 보조 버튼 & 하단 안내 바 세부 문구 */}
+                    <div className="p-3.5 rounded-xl bg-stone-50 border border-stone-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-stone-700">
+                          상세페이지 도매단가 박스 · 버튼 · 하단 안내 문구 설정
+                        </span>
+                        <div className="flex items-center gap-3 text-[11px] font-bold text-stone-600">
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={currentProduct.wholesalePriceBoxVisible !== false}
+                              onChange={(e) => handleUpdateCurrentProduct({ wholesalePriceBoxVisible: e.target.checked })}
+                              className="rounded text-[#872D35]"
+                            />
+                            <span>도매박스 표시</span>
+                          </label>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={currentProduct.detailNoticeVisible !== false}
+                              onChange={(e) => handleUpdateCurrentProduct({ detailNoticeVisible: e.target.checked })}
+                              className="rounded text-[#872D35]"
+                            />
+                            <span>하단 안내바 표시</span>
+                          </label>
+                        </div>
+                      </div>
 
-                  {/* 상세페이지 스펙 추가 설정 (원산지, 포장형태, 최소발주, 배송안내) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-stone-100">
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        원산지 정보
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.origin || ''}
-                        onChange={(e) => handleUpdateCurrentProduct({ origin: e.target.value })}
-                        placeholder="예: 절임무(국내산), 고춧가루(국내산)"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        포장 형태
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.packagingType || ''}
-                        onChange={(e) => handleUpdateCurrentProduct({ packagingType: e.target.value })}
-                        placeholder="예: 2중 안심 진공 실링백"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        최소 발주 단위
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.minOrder || ''}
-                        onChange={(e) => handleUpdateCurrentProduct({ minOrder: e.target.value })}
-                        placeholder="예: 1박스 (10kg) 이상"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">
-                        배송 조건
-                      </label>
-                      <input
-                        type="text"
-                        value={currentProduct.deliveryInfo || ''}
-                        onChange={(e) => handleUpdateCurrentProduct({ deliveryInfo: e.target.value })}
-                        placeholder="예: 전국 익일 냉장 콜드체인 직배송"
-                        className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
-                      />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">도매 박스 상단 제목</label>
+                          <input
+                            type="text"
+                            value={currentProduct.bulkPriceTitle ?? '외식업 사업자 전용 도매 납품가'}
+                            onChange={(e) => handleUpdateCurrentProduct({ bulkPriceTitle: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">도매 박스 우측 배지</label>
+                          <input
+                            type="text"
+                            value={currentProduct.bulkPriceBadge ?? 'B2B 특가 지원'}
+                            onChange={(e) => handleUpdateCurrentProduct({ bulkPriceBadge: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">도매 단가 강조 문구</label>
+                          <input
+                            type="text"
+                            value={currentProduct.bulkPriceHeading ?? '1:1 맞춤 견적 단가 적용'}
+                            onChange={(e) => handleUpdateCurrentProduct({ bulkPriceHeading: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">도매 박스 부제</label>
+                          <input
+                            type="text"
+                            value={currentProduct.bulkPriceSubtitle ?? '(월 발주량에 따른 계단식 할인)'}
+                            onChange={(e) => handleUpdateCurrentProduct({ bulkPriceSubtitle: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">보조 CTA 버튼 문구</label>
+                          <input
+                            type="text"
+                            value={currentProduct.secondaryButtonText ?? '대량 납품 견적서 요청'}
+                            onChange={(e) => handleUpdateCurrentProduct({ secondaryButtonText: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">하단 무료샘플 안내 문구</label>
+                          <input
+                            type="text"
+                            value={currentProduct.detailNoticeText ?? '사업자등록증 소지 외식업 대표님께는 택배비까지 전액 무료로 샘플을 발송합니다.'}
+                            onChange={(e) => handleUpdateCurrentProduct({ detailNoticeText: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-stone-500 mb-1">하단 안내 전화번호</label>
+                          <input
+                            type="text"
+                            value={currentProduct.detailNoticePhone ?? state.content.phone ?? '043-532-8890'}
+                            onChange={(e) => handleUpdateCurrentProduct({ detailNoticePhone: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 text-xs bg-white font-mono"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1371,19 +2071,34 @@ export const ContentManager: React.FC = () => {
                       <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-md max-w-sm w-full">
                         <div className="relative aspect-4/3 bg-stone-100">
                           <img src={currentProduct.imageUrl} alt="" className="w-full h-full object-cover" />
-                          {currentProduct.tag && (
-                            <span className="absolute top-3 left-3 px-2.5 py-1 rounded-md bg-[#872D35] text-white text-[10px] font-black shadow-xs">
-                              {currentProduct.tag}
-                            </span>
-                          )}
+                          {(() => {
+                            const visibleBadges = getProductBadges(currentProduct).filter(b => b.visible && b.text?.trim());
+                            if (visibleBadges.length === 0) return null;
+                            return (
+                              <div className="absolute top-3 left-3 flex flex-wrap gap-1">
+                                {visibleBadges.map(b => (
+                                  <span
+                                    key={b.id}
+                                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-black shadow-xs flex items-center gap-1 ${getBadgeColorClass(b.color)}`}
+                                  >
+                                    {renderBadgeIcon(b.icon, 'w-3 h-3')}
+                                    <span>{b.text}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div className="p-4 space-y-2">
                           <span className="text-[10px] font-bold text-[#872D35]">{currentProduct.category}</span>
                           <h5 className="text-base font-black text-stone-900 leading-snug">{currentProduct.name}</h5>
                           <p className="text-xs text-stone-500 line-clamp-2">{currentProduct.description}</p>
                           <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-xs text-stone-600">
-                            <span>{currentProduct.weight}</span>
-                            <span className="font-bold text-[#872D35]">{currentProduct.bulkPriceGuide}</span>
+                            {(() => {
+                              const weightSpec = getProductSpecItems(currentProduct).find(s => s.key === 'weight' && s.visible && s.value?.trim());
+                              return <span>{weightSpec ? weightSpec.value : ''}</span>;
+                            })()}
+                            <span className="font-bold text-[#872D35] truncate max-w-[180px]">{currentProduct.bulkPriceGuide}</span>
                           </div>
                           <button className="w-full py-2 bg-[#872D35] text-white text-xs font-bold rounded-lg mt-2">
                             {currentProduct.buttonText || '무료 샘플 1kg 신청'}
@@ -1400,7 +2115,15 @@ export const ContentManager: React.FC = () => {
                         <div className="flex items-center gap-3">
                           <img src={currentProduct.detailImageUrl || currentProduct.imageUrl} alt="" className="w-20 h-20 rounded-xl object-cover border border-stone-200" />
                           <div className="flex-1">
-                            <span className="text-[10px] font-bold text-[#872D35]">{currentProduct.tag}</span>
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {getProductBadges(currentProduct)
+                                .filter(b => b.visible && b.text?.trim())
+                                .map(b => (
+                                  <span key={b.id} className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${getBadgeColorClass(b.color)}`}>
+                                    {b.text}
+                                  </span>
+                                ))}
+                            </div>
                             <h4 className="text-sm font-black text-stone-900">{currentProduct.name}</h4>
                             <p className="text-[11px] text-stone-500">{currentProduct.subtitle}</p>
                           </div>
@@ -1408,28 +2131,24 @@ export const ContentManager: React.FC = () => {
                         <div className="p-2.5 bg-stone-50 rounded-lg text-stone-600">
                           {currentProduct.description}
                         </div>
-                        <div className="border border-stone-200 rounded-lg divide-y divide-stone-100">
-                          <div className="grid grid-cols-3 p-2 font-bold bg-stone-50 text-stone-700">
-                            <span>규격 항목</span>
-                            <span className="col-span-2">상세 내역</span>
-                          </div>
-                          <div className="grid grid-cols-3 p-2">
-                            <span className="font-semibold text-stone-500">포장 중량</span>
-                            <span className="col-span-2">{currentProduct.weight}</span>
-                          </div>
-                          <div className="grid grid-cols-3 p-2">
-                            <span className="font-semibold text-stone-500">보관 방법</span>
-                            <span className="col-span-2">{currentProduct.storage}</span>
-                          </div>
-                          <div className="grid grid-cols-3 p-2">
-                            <span className="font-semibold text-stone-500">소비 기한</span>
-                            <span className="col-span-2">{currentProduct.shelfLife}</span>
-                          </div>
-                          <div className="grid grid-cols-3 p-2">
-                            <span className="font-semibold text-stone-500">원재료</span>
-                            <span className="col-span-2 truncate">{currentProduct.ingredients}</span>
-                          </div>
-                        </div>
+                        {(() => {
+                          const visibleSpecs = getProductSpecItems(currentProduct).filter(s => s.visible && s.value?.trim());
+                          if (visibleSpecs.length === 0) return null;
+                          return (
+                            <div className="border border-stone-200 rounded-lg divide-y divide-stone-100">
+                              <div className="grid grid-cols-3 p-2 font-bold bg-stone-50 text-stone-700">
+                                <span>규격 항목</span>
+                                <span className="col-span-2">상세 내역</span>
+                              </div>
+                              {visibleSpecs.map((spec) => (
+                                <div key={spec.id} className="grid grid-cols-3 p-2">
+                                  <span className="font-semibold text-stone-500">{spec.label}</span>
+                                  <span className="col-span-2">{spec.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
                         <div className="p-2 bg-amber-50 text-amber-900 rounded-lg text-[11px]">
                           <strong>단가 안내:</strong> {currentProduct.bulkPriceGuide}
                         </div>
@@ -1660,6 +2379,89 @@ export const ContentManager: React.FC = () => {
                   <strong>데이터 안전 보장:</strong> 카테고리를 삭제하거나 수정하더라도 기존에 등록된 제품의 이름, 상세스펙, 이미지 및 데이터는 100% 안전하게 유지됩니다.
                 </span>
               </div>
+
+              {/* 제품소개 전체 목록 페이지 상단/하단 고정 문구 관리 */}
+              <div className="pt-4 border-t border-stone-200 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h5 className="text-xs font-black text-stone-800">제품소개 전체 목록 페이지 상단 배너 & 하단 안내 문구</h5>
+                    <p className="text-[11px] text-stone-400">제품소개(/products) 페이지의 헤더 및 하단 OEM/PB 상담 배너 문구를 수정합니다.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveAllContent}
+                    className="px-4 py-2 rounded-xl bg-[#872D35] text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>문구 저장</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 mb-1">상단 배너 영문 배지</label>
+                    <input
+                      type="text"
+                      value={contentForm.productsPageBadge ?? 'FOOD HOME PRODUCTS CATALOG'}
+                      onChange={(e) => handleFieldChange('productsPageBadge', e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 mb-1">상단 배너 제목</label>
+                    <input
+                      type="text"
+                      value={contentForm.productsPageTitle ?? 'FOOD HOME 제품소개'}
+                      onChange={(e) => handleFieldChange('productsPageTitle', e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs font-bold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 mb-1">상단 배너 설명 문구</label>
+                    <input
+                      type="text"
+                      value={contentForm.productsPageSubtitle ?? '물 생김 없는 특허 수분제어와 30년 전통 비법 양념의 명품 보쌈김치 라인업'}
+                      onChange={(e) => handleFieldChange('productsPageSubtitle', e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 mb-1">목록 우측 원료 강조 문구</label>
+                    <input
+                      type="text"
+                      value={contentForm.productsPageNotice ?? '100% 국산 농산물 원료 사용'}
+                      onChange={(e) => handleFieldChange('productsPageNotice', e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 mb-1">하단 OEM 배너 제목</label>
+                    <input
+                      type="text"
+                      value={contentForm.productsBannerTitle ?? '프랜차이즈 및 대량 납품 맞춤형 OEM/PB 상담'}
+                      onChange={(e) => handleFieldChange('productsBannerTitle', e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs font-bold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-600 mb-1">하단 OEM 배너 설명 & 버튼명</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={contentForm.productsBannerDesc ?? '매장별 맞춤 염도, 단맛 조절, 전용 라벨링 포장 및 전국 직송 물류 견적을 1:1 전담 매니저가 친절하게 상담해 드립니다.'}
+                        onChange={(e) => handleFieldChange('productsBannerDesc', e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                      />
+                      <input
+                        type="text"
+                        value={contentForm.productsBannerBtnText ?? '대량 납품 견적서 요청하기'}
+                        onChange={(e) => handleFieldChange('productsBannerBtnText', e.target.value)}
+                        className="w-40 px-2.5 py-2 rounded-xl border border-stone-200 text-xs font-bold bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1738,23 +2540,85 @@ export const ContentManager: React.FC = () => {
 
           {/* 4 Steps Management */}
           <div className="pt-4 border-t border-stone-100 space-y-4">
-            <h5 className="text-xs font-black text-stone-800">제조 4단계 상세 공정 단계</h5>
+            <div className="flex items-center justify-between">
+              <h5 className="text-xs font-black text-stone-800">제조 상세 공정 단계 ({(contentForm.processSteps || []).length}단계)</h5>
+              <button
+                type="button"
+                onClick={() => {
+                  const cur = contentForm.processSteps || [];
+                  const newStep: ProcessStepItem = {
+                    step: cur.length + 1,
+                    title: '새 제조 공정 단계',
+                    desc: '상세 공정 설명을 입력하세요.',
+                    imageUrl: './images/facility_cleanroom.jpg',
+                    badge: '품질 관리'
+                  };
+                  handleFieldChange('processSteps', [...cur, newStep]);
+                }}
+                className="px-3 py-1 rounded-lg bg-stone-800 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>단계 추가</span>
+              </button>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {(contentForm.processSteps || []).map((step, idx) => (
+              {(contentForm.processSteps || []).map((step, idx, arr) => (
                 <div key={idx} className="p-4 rounded-xl border border-stone-200 bg-stone-50/50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-[#872D35]">STEP 0{step.step}</span>
-                    <input
-                      type="text"
-                      value={step.badge || ''}
-                      onChange={(e) => {
-                        const updated = [...(contentForm.processSteps || [])];
-                        updated[idx].badge = e.target.value;
-                        handleFieldChange('processSteps', updated);
-                      }}
-                      placeholder="배지 (예: 엄선 원물)"
-                      className="w-24 px-2 py-0.5 text-[10px] font-bold border border-stone-300 rounded bg-white text-right"
-                    />
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-[#872D35]">STEP 0{idx + 1}</span>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={step.badge || ''}
+                        onChange={(e) => {
+                          const updated = [...(contentForm.processSteps || [])];
+                          updated[idx].badge = e.target.value;
+                          handleFieldChange('processSteps', updated);
+                        }}
+                        placeholder="배지 (예: 엄선 원물)"
+                        className="w-24 px-2 py-0.5 text-[10px] font-bold border border-stone-300 rounded bg-white text-right"
+                      />
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => {
+                          const updated = [...arr];
+                          const [moved] = updated.splice(idx, 1);
+                          updated.splice(idx - 1, 0, moved);
+                          handleFieldChange('processSteps', updated.map((s, i) => ({ ...s, step: i + 1 })));
+                        }}
+                        className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                        title="앞으로"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === arr.length - 1}
+                        onClick={() => {
+                          const updated = [...arr];
+                          const [moved] = updated.splice(idx, 1);
+                          updated.splice(idx + 1, 0, moved);
+                          handleFieldChange('processSteps', updated.map((s, i) => ({ ...s, step: i + 1 })));
+                        }}
+                        className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                        title="뒤로"
+                      >
+                        ▼
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!confirm(`'${step.title}' 공정 단계를 삭제하시겠습니까?`)) return;
+                          const updated = arr.filter((_, i) => i !== idx).map((s, i) => ({ ...s, step: i + 1 }));
+                          handleFieldChange('processSteps', updated);
+                        }}
+                        className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                        title="삭제"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <input
                     type="text"
@@ -1866,11 +2730,70 @@ export const ContentManager: React.FC = () => {
 
           {/* 3 Delivery Steps */}
           <div className="pt-4 border-t border-stone-100 space-y-4">
-            <h5 className="text-xs font-black text-stone-800">납품 및 정기 발주 3단계 프로세스</h5>
+            <div className="flex items-center justify-between">
+              <h5 className="text-xs font-black text-stone-800">납품 및 정기 발주 프로세스 ({(contentForm.deliverySteps || []).length}단계)</h5>
+              <button
+                type="button"
+                onClick={() => {
+                  const cur = contentForm.deliverySteps || [];
+                  const newStep: WholesaleStepItem = {
+                    step: cur.length + 1,
+                    title: '새 납품 안내 단계',
+                    desc: '단계 설명을 입력하세요.'
+                  };
+                  handleFieldChange('deliverySteps', [...cur, newStep]);
+                }}
+                className="px-3 py-1 rounded-lg bg-stone-800 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>단계 추가</span>
+              </button>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {(contentForm.deliverySteps || []).map((step, idx) => (
+              {(contentForm.deliverySteps || []).map((step, idx, arr) => (
                 <div key={idx} className="p-4 rounded-xl border border-stone-200 bg-stone-50/50 space-y-2">
-                  <span className="text-xs font-black text-[#872D35]">STEP 0{step.step}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-[#872D35]">STEP 0{idx + 1}</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => {
+                          const updated = [...arr];
+                          const [moved] = updated.splice(idx, 1);
+                          updated.splice(idx - 1, 0, moved);
+                          handleFieldChange('deliverySteps', updated.map((s, i) => ({ ...s, step: i + 1 })));
+                        }}
+                        className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === arr.length - 1}
+                        onClick={() => {
+                          const updated = [...arr];
+                          const [moved] = updated.splice(idx, 1);
+                          updated.splice(idx + 1, 0, moved);
+                          handleFieldChange('deliverySteps', updated.map((s, i) => ({ ...s, step: i + 1 })));
+                        }}
+                        className="p-1 text-stone-400 hover:text-stone-700 disabled:opacity-20 cursor-pointer text-[11px]"
+                      >
+                        ▼
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!confirm(`'${step.title}' 단계를 삭제하시겠습니까?`)) return;
+                          const updated = arr.filter((_, i) => i !== idx).map((s, i) => ({ ...s, step: i + 1 }));
+                          handleFieldChange('deliverySteps', updated);
+                        }}
+                        className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
                   <input
                     type="text"
                     value={step.title}
@@ -2014,6 +2937,67 @@ export const ContentManager: React.FC = () => {
                 placeholder="예: 12:00 ~ 13:00"
                 className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
               />
+            </div>
+          </div>
+
+          {/* 공지사항 & FAQ 페이지 상단 배너 문구 */}
+          <div className="pt-4 border-t border-stone-100 space-y-3">
+            <h5 className="text-xs font-black text-stone-800">공지사항 · FAQ 페이지 상단 배너 문구</h5>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">공지사항 영문 배지</label>
+                <input
+                  type="text"
+                  value={contentForm.noticePageBadge ?? 'FOOD HOME NOTICE & NEWS'}
+                  onChange={(e) => handleFieldChange('noticePageBadge', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">공지사항 페이지 제목</label>
+                <input
+                  type="text"
+                  value={contentForm.noticePageTitle ?? '푸드홈 공지사항'}
+                  onChange={(e) => handleFieldChange('noticePageTitle', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs font-bold bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">공지사항 페이지 설명</label>
+                <input
+                  type="text"
+                  value={contentForm.noticePageSubtitle ?? '푸드홈의 주요 생산 설비 소식, 납품 단가 정책, 물류 일정 및 중요 안내를 전해드립니다.'}
+                  onChange={(e) => handleFieldChange('noticePageSubtitle', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">FAQ 영문 배지</label>
+                <input
+                  type="text"
+                  value={contentForm.faqPageBadge ?? 'CUSTOMER SUPPORT FAQ'}
+                  onChange={(e) => handleFieldChange('faqPageBadge', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">FAQ 페이지 제목</label>
+                <input
+                  type="text"
+                  value={contentForm.faqPageTitle ?? '자주하는 질문 (FAQ)'}
+                  onChange={(e) => handleFieldChange('faqPageTitle', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs font-bold bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-stone-600 mb-1">FAQ 페이지 설명</label>
+                <input
+                  type="text"
+                  value={contentForm.faqPageSubtitle ?? '외식업 대표님들께서 가장 많이 문의하시는 무료 샘플 신청, 대량 발주, 물류 및 보관에 대한 질문과 답변입니다.'}
+                  onChange={(e) => handleFieldChange('faqPageSubtitle', e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white"
+                />
+              </div>
             </div>
           </div>
 

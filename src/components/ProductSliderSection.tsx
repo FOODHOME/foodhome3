@@ -1,7 +1,12 @@
 import React, { useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { ChevronLeft, ChevronRight, Sparkles, Eye, Package, ArrowRight } from 'lucide-react';
-
+import {
+  getProductBadges,
+  getVisibleSpecByKey,
+  getBadgeColorClass,
+  renderBadgeIcon
+} from '../utils/productUtils';
 import { MainSectionConfig } from '../types';
 
 export const ProductSliderSection: React.FC<{ config?: MainSectionConfig }> = ({ config }) => {
@@ -109,20 +114,24 @@ export const ProductSliderSection: React.FC<{ config?: MainSectionConfig }> = ({
                   loading="lazy"
                 />
                 
-                {/* Category & Tag Overlay */}
-                <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1.5">
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-[#872D35] text-white shadow-2xs">
-                    {product.tag || product.category}
-                  </span>
-                </div>
-
-                {product.isPopular && (
-                  <div className="absolute top-2.5 right-2.5">
-                    <span className="text-[11px] font-extrabold px-2 py-0.5 rounded bg-[#332525]/90 text-amber-300 backdrop-blur-xs">
-                      인기상품
-                    </span>
-                  </div>
-                )}
+                {/* Dynamic Badges Overlay */}
+                {(() => {
+                  const visibleBadges = getProductBadges(product).filter(b => b.visible && b.text?.trim());
+                  if (visibleBadges.length === 0) return null;
+                  return (
+                    <div className="absolute top-2.5 left-2.5 right-2.5 flex flex-wrap gap-1.5">
+                      {visibleBadges.map(badge => (
+                        <span
+                          key={badge.id}
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded shadow-2xs flex items-center gap-1 ${getBadgeColorClass(badge.color)}`}
+                        >
+                          {renderBadgeIcon(badge.icon, 'w-3 h-3')}
+                          <span>{badge.text}</span>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Product Info */}
@@ -130,8 +139,16 @@ export const ProductSliderSection: React.FC<{ config?: MainSectionConfig }> = ({
                 <div>
                   <div className="text-[11px] text-slate-500 font-semibold mb-1 flex items-center gap-1.5">
                     <span>{product.category}</span>
-                    <span>·</span>
-                    <span>{product.weight}</span>
+                    {(() => {
+                      const weightSpec = getVisibleSpecByKey(product, 'weight');
+                      if (!weightSpec) return null;
+                      return (
+                        <>
+                          <span>·</span>
+                          <span>{weightSpec.value}</span>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <h3 
@@ -147,14 +164,25 @@ export const ProductSliderSection: React.FC<{ config?: MainSectionConfig }> = ({
                   </p>
                 </div>
 
-                {/* Storage & Shelf life pill */}
-                <div className="mt-4 pt-3 border-t border-[#F0EBE6] flex items-center justify-between text-[11px] text-slate-600">
-                  <span className="flex items-center gap-1">
-                    <Package className="w-3.5 h-3.5 text-[#872D35]" />
-                    <span>{product.storage}</span>
-                  </span>
-                  <span className="text-slate-500 font-medium">{product.shelfLife}</span>
-                </div>
+                {/* Storage & Shelf life pill (Respects hidden status) */}
+                {(() => {
+                  const storageSpec = getVisibleSpecByKey(product, 'storage');
+                  const shelfLifeSpec = getVisibleSpecByKey(product, 'shelfLife');
+                  if (!storageSpec && !shelfLifeSpec) return null;
+                  return (
+                    <div className="mt-4 pt-3 border-t border-[#F0EBE6] flex items-center justify-between gap-2 text-[11px] text-slate-600">
+                      {storageSpec && (
+                        <span className="flex items-center gap-1 truncate">
+                          <Package className="w-3.5 h-3.5 text-[#872D35] shrink-0" />
+                          <span className="truncate">{storageSpec.value}</span>
+                        </span>
+                      )}
+                      {shelfLifeSpec && (
+                        <span className="text-slate-500 font-medium truncate ml-auto">{shelfLifeSpec.value}</span>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Card CTA Actions */}
                 <div className="mt-3.5 grid grid-cols-2 gap-2">

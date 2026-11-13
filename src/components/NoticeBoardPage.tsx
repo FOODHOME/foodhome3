@@ -84,13 +84,13 @@ export const NoticeBoardPage: React.FC = () => {
         <div className="relative z-10 text-center max-w-4xl mx-auto px-4">
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#872D35]/80 text-white text-xs font-bold mb-3 backdrop-blur-xs border border-white/20">
             <Megaphone className="w-3.5 h-3.5 text-amber-300" />
-            <span>FOOD HOME NOTICE & NEWS</span>
+            <span>{state.content.noticePageBadge || 'FOOD HOME NOTICE & NEWS'}</span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight drop-shadow-md">
-            푸드홈 공지사항
+            {state.content.noticePageTitle || '푸드홈 공지사항'}
           </h1>
           <p className="mt-2 text-sm sm:text-base text-stone-200 font-medium max-w-xl mx-auto drop-shadow-sm">
-            푸드홈의 주요 생산 설비 소식, 납품 단가 정책, 물류 일정 및 중요 안내를 전해드립니다.
+            {state.content.noticePageSubtitle || '푸드홈의 주요 생산 설비 소식, 납품 단가 정책, 물류 일정 및 중요 안내를 전해드립니다.'}
           </p>
         </div>
       </section>
