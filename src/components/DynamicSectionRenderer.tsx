@@ -1,5 +1,6 @@
 import React from 'react';
 import { CustomSectionItem } from '../types';
+import { resolveSectionTextAlign, SectionTextAlign } from '../data/defaultPageSections';
 import { useApp } from '../context/AppContext';
 import { 
   ShieldCheck, 
@@ -97,6 +98,18 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
     };
   };
 
+  const TEXT_ALIGN_CLASS: Record<SectionTextAlign, string> = {
+    left: 'text-left',
+    center: 'text-center',
+    right: 'text-right'
+  };
+
+  const FLEX_ALIGN_CLASS: Record<SectionTextAlign, string> = {
+    left: 'justify-start',
+    center: 'justify-center',
+    right: 'justify-end'
+  };
+
   if (!activeSections || activeSections.length === 0) {
     return null;
   }
@@ -104,11 +117,15 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
   return (
     <div className="space-y-12">
       {activeSections.map((sec) => {
+        const align = resolveSectionTextAlign(sec);
+        const alignClass = TEXT_ALIGN_CLASS[align];
+        const flexAlignClass = FLEX_ALIGN_CLASS[align];
+
         switch (sec.type) {
           // 1. Heading Section
           case 'heading':
             return (
-              <div key={sec.id} className="text-center max-w-3xl mx-auto py-4">
+              <div key={sec.id} className={`${alignClass} max-w-3xl mx-auto py-4`}>
                 {sec.badge && (
                   <span className="inline-block px-3 py-1 rounded-full bg-[#872D35]/10 text-[#872D35] text-xs font-black uppercase tracking-wider mb-2">
                     {sec.badge}
@@ -130,13 +147,13 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
           // 2. Plain Text Section
           case 'text':
             return (
-              <div key={sec.id} className="bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm space-y-4">
+              <div key={sec.id} className={`bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm space-y-4 ${alignClass}`}>
                 {sec.title && (
-                  <h3 className="text-xl font-black text-stone-900">
+                  <h3 className={`text-xl font-black text-stone-900 whitespace-pre-line ${alignClass}`}>
                     {sec.title}
                   </h3>
                 )}
-                <div className="text-stone-700 text-sm sm:text-base leading-relaxed whitespace-pre-line space-y-2">
+                <div className={`text-stone-700 text-sm sm:text-base leading-relaxed whitespace-pre-line space-y-2 ${alignClass}`}>
                   {sec.content}
                 </div>
               </div>
@@ -156,7 +173,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                   <img src={imgSrc} alt={sec.title || ''} className="w-full h-auto object-cover max-h-[580px] bg-transparent" />
                 )}
                 {(sec.title || sec.content) && (
-                  <div className="p-4 sm:p-5 bg-white border-t border-stone-100 text-center">
+                  <div className={`p-4 sm:p-5 bg-white border-t border-stone-100 ${alignClass}`}>
                     {sec.title && <h4 className="font-bold text-stone-900 text-sm sm:text-base">{sec.title}</h4>}
                     {sec.content && <p className="text-xs sm:text-sm text-stone-500 mt-1 leading-relaxed whitespace-pre-line">{sec.content}</p>}
                   </div>
@@ -182,7 +199,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                       <img src={imgSrc} alt={sec.title || ''} className="w-full h-full object-cover" />
                     </div>
                   )}
-                  <div className="p-6 sm:p-10 space-y-4">
+                  <div className={`p-6 sm:p-10 space-y-4 ${alignClass}`}>
                     {sec.badge && (
                       <span className="inline-block px-3 py-1 rounded bg-[#872D35]/10 text-[#872D35] text-xs font-bold">
                         {sec.badge}
@@ -199,7 +216,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                       </div>
                     )}
                     {(sec.buttonText || sec.secondaryButtonText) && (
-                      <div className="flex flex-wrap gap-3 pt-3">
+                      <div className={`flex flex-wrap gap-3 pt-3 ${flexAlignClass}`}>
                         {sec.buttonText && (
                           <button
                             onClick={() => handleAction(sec.buttonAction, sec.buttonLink)}
@@ -259,7 +276,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                   </div>
 
                   {/* Text Column */}
-                  <div className={`lg:col-span-7 space-y-4 ${isRight ? 'lg:order-1' : 'lg:order-2'}`}>
+                  <div className={`lg:col-span-7 space-y-4 ${isRight ? 'lg:order-1' : 'lg:order-2'} ${alignClass}`}>
                     {sec.badge && (
                       <div className="inline-block px-3 py-1 rounded bg-[#872D35]/10 text-[#872D35] text-xs font-bold">
                         {sec.badge}
@@ -276,7 +293,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                       </div>
                     )}
                     {(sec.buttonText || sec.secondaryButtonText) && (
-                      <div className="flex flex-wrap gap-3 pt-3">
+                      <div className={`flex flex-wrap gap-3 pt-3 ${flexAlignClass}`}>
                         {sec.buttonText && (
                           <button
                             onClick={() => handleAction(sec.buttonAction, sec.buttonLink)}
@@ -432,7 +449,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
             const ctaSecondary = getButtonStyling(sec.secondaryButtonText, sec.secondaryButtonLink, true);
 
             return (
-              <div key={sec.id} className="p-6 sm:p-10 rounded-3xl bg-[#FAF8F5] border border-stone-200 text-center space-y-4">
+              <div key={sec.id} className={`p-6 sm:p-10 rounded-3xl bg-[#FAF8F5] border border-stone-200 ${alignClass} space-y-4`}>
                 {sec.badge && (
                   <span className="inline-block px-3 py-1 rounded-full bg-[#872D35]/10 text-[#872D35] text-xs font-bold">
                     {sec.badge}
@@ -444,12 +461,12 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                   </h4>
                 )}
                 {sec.content && (
-                  <p className="text-xs sm:text-sm text-stone-600 max-w-2xl mx-auto leading-relaxed whitespace-pre-line">
+                  <p className={`text-xs sm:text-sm text-stone-600 max-w-2xl ${align === 'center' ? 'mx-auto' : align === 'right' ? 'ml-auto' : ''} leading-relaxed whitespace-pre-line`}>
                     {sec.content}
                   </p>
                 )}
                 {(sec.buttonText || sec.secondaryButtonText) && (
-                  <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <div className={`flex flex-wrap items-center ${flexAlignClass} gap-3 pt-2`}>
                     {sec.buttonText && (
                       <button
                         onClick={() => handleAction(sec.buttonAction, sec.buttonLink)}

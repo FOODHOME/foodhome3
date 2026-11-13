@@ -72,6 +72,7 @@ export interface CustomSectionItem {
   videoUrl?: string;
   imagePosition?: 'left' | 'right' | 'top';
   imageSize?: 'small' | 'medium' | 'large' | 'full';
+  textAlign?: 'left' | 'center' | 'right';
   authorRole?: string;
   authorName?: string;
   signatureImageUrl?: string;
