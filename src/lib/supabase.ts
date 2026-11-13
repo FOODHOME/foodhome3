@@ -173,6 +173,11 @@ function canvasHasTransparency(ctx: CanvasRenderingContext2D, width: number, hei
   return false;
 }
 
+function isSupportedImageFile(file: File): boolean {
+  if (file.type && file.type.startsWith('image/')) return true;
+  return /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name || '');
+}
+
 /**
  * Optimizes an uploaded image into a compact Data URL for reliable localStorage persistence
  * when external cloud storage is not configured.
@@ -182,12 +187,18 @@ export async function optimizeImageFileToDataUrl(
   folder = 'banners'
 ): Promise<{ url: string | null; error?: string }> {
   try {
-    if (!file.type.startsWith('image/')) {
+    if (!isSupportedImageFile(file)) {
       return { url: null, error: '이미지 파일(JPG, PNG, WEBP, GIF, SVG)만 업로드할 수 있습니다.' };
     }
 
+    const lowerName = (file.name || '').toLowerCase();
+    const isSvg = file.type === 'image/svg+xml' || lowerName.endsWith('.svg');
+    const isGif = file.type === 'image/gif' || lowerName.endsWith('.gif');
+    const isPng = file.type === 'image/png' || lowerName.endsWith('.png');
+    const isWebp = file.type === 'image/webp' || lowerName.endsWith('.webp');
+
     // Keep SVG as-is (size capped reasonably)
-    if (file.type === 'image/svg+xml') {
+    if (isSvg) {
       if (file.size > 512 * 1024) {
         return { url: null, error: 'SVG 파일은 500KB 이하만 업로드할 수 있습니다.' };
       }
@@ -196,16 +207,15 @@ export async function optimizeImageFileToDataUrl(
     }
 
     // Preserve animated/small GIF if under 450KB
-    if (file.type === 'image/gif' && file.size <= 450 * 1024) {
+    if (isGif && file.size <= 450 * 1024) {
       const dataUrl = await readFileAsDataUrl(file);
       return { url: dataUrl };
     }
 
-    const isLogoOrSignature = folder === 'logos';
-    const maxDimension = isLogoOrSignature ? 640 : 1280;
-    const targetMaxChars = isLogoOrSignature ? 220_000 : 380_000;
+    const isLogoOrSignature = folder === 'logos' || folder === 'signatures';
+    const maxDimension = isLogoOrSignature ? 800 : 1280;
+    const targetMaxChars = isLogoOrSignature ? 260_000 : 380_000;
 
-    // Small non-oversized images under 140KB can still be checked for pixel dimensions safely
     const objectUrl = typeof URL !== 'undefined' && URL.createObjectURL ? URL.createObjectURL(file) : null;
     const rawDataUrl = objectUrl ? null : await readFileAsDataUrl(file);
 
@@ -219,59 +229,66 @@ export async function optimizeImageFileToDataUrl(
         return { url: fallback };
       }
 
-      // If already compact and within dimensions, return directly without re-encoding
-      if (file.size <= 140 * 1024 && origW <= maxDimension && origH <= maxDimension) {
+      // If already compact and within dimensions, return original untouched (100% original PNG/WebP/JPG)
+      if (file.size <= 160 * 1024 && origW <= maxDimension && origH <= maxDimension) {
         const directUrl = rawDataUrl || (await readFileAsDataUrl(file));
         return { url: directUrl };
       }
 
       const scale = Math.min(1, maxDimension / Math.max(origW, origH));
-      let targetW = Math.max(1, Math.round(origW * scale));
-      let targetH = Math.max(1, Math.round(origH * scale));
+      const targetW = Math.max(1, Math.round(origW * scale));
+      const targetH = Math.max(1, Math.round(origH * scale));
 
       const canvas = document.createElement('canvas');
       canvas.width = targetW;
       canvas.height = targetH;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: true });
       if (!ctx) {
         const fallback = rawDataUrl || (await readFileAsDataUrl(file));
         return { url: fallback };
       }
 
+      ctx.clearRect(0, 0, targetW, targetH);
       ctx.drawImage(img, 0, 0, targetW, targetH);
 
-      const keepAlpha =
-        (file.type === 'image/png' || file.type === 'image/webp') &&
-        (isLogoOrSignature || canvasHasTransparency(ctx, targetW, targetH));
+      // NEVER convert PNG or WebP uploads to JPEG — always preserve transparency & alpha channel
+      const keepAlpha = isPng || isWebp || isLogoOrSignature || canvasHasTransparency(ctx, targetW, targetH);
 
       if (keepAlpha) {
-        // Prefer PNG for small transparent graphics; fall back to WebP if PNG is too heavy for localStorage
+        // Keep exact PNG format whenever it fits within localStorage budget
         let out = canvas.toDataURL('image/png');
         if (out.length > targetMaxChars) {
-          const webpOut = canvas.toDataURL('image/webp', 0.86);
+          // Try alpha-capable WebP first to preserve transparency at smaller size
+          const webpOut = canvas.toDataURL('image/webp', 0.88);
           if (webpOut.startsWith('data:image/webp') && webpOut.length < out.length) {
             out = webpOut;
           }
         }
-        // Step down resolution slightly if still above budget
+        // Step down dimensions if still above budget, always using alpha-supporting format
         let shrink = 0.8;
-        while (out.length > targetMaxChars && shrink >= 0.45) {
+        while (out.length > targetMaxChars && shrink >= 0.35) {
           const sw = Math.max(1, Math.round(targetW * shrink));
           const sh = Math.max(1, Math.round(targetH * shrink));
           const c2 = document.createElement('canvas');
           c2.width = sw;
           c2.height = sh;
-          const ctx2 = c2.getContext('2d');
+          const ctx2 = c2.getContext('2d', { alpha: true });
           if (!ctx2) break;
+          ctx2.clearRect(0, 0, sw, sh);
           ctx2.drawImage(img, 0, 0, sw, sh);
-          const candidateWebp = c2.toDataURL('image/webp', 0.82);
-          out = candidateWebp.startsWith('data:image/webp') ? candidateWebp : c2.toDataURL('image/png');
+          const png2 = c2.toDataURL('image/png');
+          if (png2.length <= targetMaxChars) {
+            out = png2;
+            break;
+          }
+          const candidateWebp = c2.toDataURL('image/webp', 0.84);
+          out = candidateWebp.startsWith('data:image/webp') && candidateWebp.length < png2.length ? candidateWebp : png2;
           shrink -= 0.15;
         }
         return { url: out };
       }
 
-      // Opaque photos: use JPEG with adaptive quality & gentle resolution step-down if needed
+      // Opaque JPEG photos: use JPEG with adaptive quality & gentle resolution step-down if needed
       let quality = 0.84;
       let out = canvas.toDataURL('image/jpeg', quality);
       while (out.length > targetMaxChars && quality > 0.48) {
@@ -313,8 +330,8 @@ export async function optimizeImageFileToDataUrl(
  * Upload an image file to Supabase Storage bucket 'foodhome-media'
  */
 export async function uploadImageToStorage(file: File, folder = 'banners'): Promise<{ url: string | null; error?: string }> {
-  if (!file.type.startsWith('image/')) {
-    return { url: null, error: '이미지 파일만 업로드할 수 있습니다.' };
+  if (!isSupportedImageFile(file)) {
+    return { url: null, error: '이미지 파일(PNG, JPG, JPEG, WEBP, GIF, SVG)만 업로드할 수 있습니다.' };
   }
 
   const client = getSupabaseClient();
@@ -323,7 +340,7 @@ export async function uploadImageToStorage(file: File, folder = 'banners'): Prom
   }
 
   try {
-    const fileExt = file.name.split('.').pop() || 'jpg';
+    const fileExt = file.name.split('.').pop() || 'png';
     const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
 
     const { error: uploadError } = await client.storage
@@ -340,7 +357,7 @@ export async function uploadImageToStorage(file: File, folder = 'banners'): Prom
 
     const { data } = client.storage.from('foodhome-media').getPublicUrl(fileName);
     return { url: data.publicUrl };
-  } catch (e: any) {
+  } catch {
     return optimizeImageFileToDataUrl(file, folder);
   }
 }

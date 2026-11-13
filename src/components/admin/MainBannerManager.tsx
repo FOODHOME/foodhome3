@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { BannerSlide } from '../../types';
 import { uploadImageToStorage } from '../../lib/supabase';
@@ -44,6 +44,12 @@ export const MainBannerManager: React.FC = () => {
           }
         ];
   });
+
+  useEffect(() => {
+    if (state.content.banners && state.content.banners.length > 0) {
+      setBanners(state.content.banners);
+    }
+  }, [state.content.banners]);
 
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
   const [isUploading, setIsUploading] = useState(false);

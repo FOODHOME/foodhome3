@@ -100,21 +100,25 @@ export const ContentManager: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const prevStateContentRef = useRef(state.content);
 
-  // Sync content form when state changes (without clobbering unsaved fields if only pageSections changed)
+  // Sync content form when state changes (only merge keys that changed in state.content, preserving unsaved edits)
   useEffect(() => {
     const prev = prevStateContentRef.current;
     if (prev !== state.content) {
-      const onlyPageSectionsChanged =
-        state.content.pageSections !== prev.pageSections &&
-        Object.keys({ ...prev, ...state.content }).every(
-          (key) => key === 'pageSections' || (prev as any)[key] === (state.content as any)[key]
-        );
-
-      if (onlyPageSectionsChanged) {
-        setContentForm(cur => ({ ...cur, pageSections: state.content.pageSections }));
-      } else {
-        setContentForm(state.content);
-      }
+      setContentForm(cur => {
+        const next = { ...cur };
+        const allKeys = new Set([
+          ...Object.keys(prev || {}),
+          ...Object.keys(state.content || {})
+        ]);
+        allKeys.forEach((key) => {
+          const prevVal = (prev as any)[key];
+          const nextVal = (state.content as any)[key];
+          if (prevVal !== nextVal) {
+            (next as any)[key] = nextVal;
+          }
+        });
+        return next;
+      });
       prevStateContentRef.current = state.content;
     }
   }, [state.content]);
@@ -134,10 +138,21 @@ export const ContentManager: React.FC = () => {
   };
 
   const handleSaveAllContent = () => {
-    const { pageSections: _preserveSavedSections, ...restContentForm } = contentForm;
-    updateContent(restContentForm);
-    if (contentForm.companySubpages) {
-      updateCompanySubpages(contentForm.companySubpages);
+    const { pageSections: _preserveSavedSections, companySubpages: nextSubpages, ...restContentForm } = contentForm;
+    const changedFields: Record<string, any> = {};
+    (Object.keys(restContentForm) as Array<keyof typeof restContentForm>).forEach((key) => {
+      const nextVal = restContentForm[key];
+      const prevVal = (state.content as any)[key];
+      if (JSON.stringify(nextVal) !== JSON.stringify(prevVal)) {
+        changedFields[key] = nextVal;
+      }
+    });
+
+    if (Object.keys(changedFields).length > 0) {
+      updateContent(changedFields);
+    }
+    if (nextSubpages && JSON.stringify(nextSubpages) !== JSON.stringify(state.content.companySubpages)) {
+      updateCompanySubpages(nextSubpages);
     }
     showToast('상단 메뉴 콘텐츠 전체가 성공적으로 저장되었습니다.');
   };
@@ -151,8 +166,9 @@ export const ContentManager: React.FC = () => {
     inputEl.value = '';
     if (!file) return;
 
+    const folder = fieldOrCallback === 'ceoSignatureImage' ? 'logos' : 'content';
     setIsUploading(true);
-    const res = await uploadImageToStorage(file, 'content');
+    const res = await uploadImageToStorage(file, folder);
     setIsUploading(false);
 
     if (res.url) {
@@ -460,6 +476,12 @@ export const ContentManager: React.FC = () => {
   // Product Category Management Modal State
   const [editableCats, setEditableCats] = useState<ProductCategoryItem[]>(productCategories);
   const [newCatName, setNewCatName] = useState('');
+
+  useEffect(() => {
+    if (state.content.productCategoriesList && state.content.productCategoriesList.length > 0) {
+      setEditableCats(state.content.productCategoriesList);
+    }
+  }, [state.content.productCategoriesList]);
 
   const handleSaveCategories = () => {
     updateProductCategories(editableCats);
@@ -1103,8 +1125,38 @@ export const ContentManager: React.FC = () => {
                 sections={resolveAboutSections(contentForm.pageSections, currentSubpage.id)}
                 fallbackSections={getDefaultPageSections(`about-${currentSubpage.id}`, contentForm)}
                 onChange={(newSecs) => {
+                  const linkedUpdates: Record<string, any> = {};
+                  if (currentSubpage.id === 'intro') {
+                    const introImgSec = newSecs.find(s => s.id === 'sec-intro-image');
+                    if (introImgSec && typeof introImgSec.imageUrl === 'string' && introImgSec.imageUrl !== contentForm.ceoImageUrl) {
+                      linkedUpdates.ceoImageUrl = introImgSec.imageUrl;
+                    }
+                    const introSigSec = newSecs.find(s => s.id === 'sec-intro-signature');
+                    if (introSigSec) {
+                      if (typeof introSigSec.authorRole === 'string' && introSigSec.authorRole !== contentForm.ceoRole) {
+                        linkedUpdates.ceoRole = introSigSec.authorRole;
+                      }
+                      if (typeof introSigSec.authorName === 'string' && introSigSec.authorName !== contentForm.ceoName) {
+                        linkedUpdates.ceoName = introSigSec.authorName;
+                      }
+                      if (typeof introSigSec.signatureImageUrl === 'string' && introSigSec.signatureImageUrl !== contentForm.ceoSignatureImage) {
+                        linkedUpdates.ceoSignatureImage = introSigSec.signatureImageUrl;
+                      }
+                    }
+                    const introTextSec = newSecs.find(s => s.id === 'sec-intro-text-1');
+                    if (introTextSec) {
+                      if (typeof introTextSec.title === 'string' && introTextSec.title !== contentForm.ceoTitle) {
+                        linkedUpdates.ceoTitle = introTextSec.title;
+                      }
+                      if (typeof introTextSec.content === 'string' && introTextSec.content !== contentForm.ceoGreeting) {
+                        linkedUpdates.ceoGreeting = introTextSec.content;
+                      }
+                    }
+                  }
+
                   setContentForm(prev => ({
                     ...prev,
+                    ...linkedUpdates,
                     pageSections: {
                       ...(prev.pageSections || {}),
                       [`about-${currentSubpage.id}`]: newSecs,
@@ -1112,6 +1164,9 @@ export const ContentManager: React.FC = () => {
                     }
                   }));
                   updatePageSections(`about-${currentSubpage.id}`, newSecs);
+                  if (Object.keys(linkedUpdates).length > 0) {
+                    updateContent(linkedUpdates);
+                  }
                 }}
               />
             </div>

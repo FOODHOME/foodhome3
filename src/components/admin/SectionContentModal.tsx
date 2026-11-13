@@ -51,7 +51,16 @@ export const SectionContentModal: React.FC<SectionContentModalProps> = ({
   };
 
   const handleSave = () => {
-    updateContent(formContent);
+    const changed: Record<string, any> = {};
+    (Object.keys(formContent) as Array<keyof typeof formContent>).forEach((key) => {
+      if (key === 'pageSections') return;
+      if (JSON.stringify(formContent[key]) !== JSON.stringify(state.content[key])) {
+        changed[key] = formContent[key];
+      }
+    });
+    if (Object.keys(changed).length > 0) {
+      updateContent(changed);
+    }
     showToast(`'${sectionLabel}' 섹션의 콘텐츠가 저장되었습니다.`);
     onClose();
   };

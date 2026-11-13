@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { uploadImageToStorage } from '../../lib/supabase';
 import { Building, Phone, Mail, MapPin, Printer, Clock, FileText, Save, Image as ImageIcon, Upload, RotateCcw } from 'lucide-react';
@@ -6,21 +6,42 @@ import { FoodhomeLogo } from '../FoodhomeLogo';
 
 export const SiteInfoManager: React.FC = () => {
   const { state, updateContent, showToast } = useApp();
-  const [form, setForm] = useState({
-    logoUrl: state.content.logoUrl || '',
-    headerLogoWidth: state.content.headerLogoWidth || 160,
-    footerLogoWidth: state.content.footerLogoWidth || 140,
-    companyName: state.content.companyName,
-    ceoName: state.content.ceoName,
-    businessNumber: state.content.businessNumber,
-    mailOrderNumber: state.content.mailOrderNumber,
-    factoryAddress: state.content.factoryAddress,
-    phone: state.content.phone,
-    fax: state.content.fax,
-    email: state.content.email,
-    csHours: state.content.csHours,
-    footerNotice: state.content.footerNotice || '본 사이트의 모든 콘텐츠, 이미지, 제품 디자인은 (주)푸드홈의 자산이며 무단 도용을 금합니다.'
+  const buildFormFromContent = (c: typeof state.content) => ({
+    logoUrl: c.logoUrl || '',
+    headerLogoWidth: c.headerLogoWidth || 160,
+    footerLogoWidth: c.footerLogoWidth || 140,
+    companyName: c.companyName,
+    ceoName: c.ceoName,
+    businessNumber: c.businessNumber,
+    mailOrderNumber: c.mailOrderNumber,
+    factoryAddress: c.factoryAddress,
+    phone: c.phone,
+    fax: c.fax,
+    email: c.email,
+    csHours: c.csHours,
+    footerNotice: c.footerNotice || '본 사이트의 모든 콘텐츠, 이미지, 제품 디자인은 (주)푸드홈의 자산이며 무단 도용을 금합니다.'
   });
+
+  const [form, setForm] = useState(() => buildFormFromContent(state.content));
+  const prevContentRef = useRef(state.content);
+
+  useEffect(() => {
+    const prev = prevContentRef.current;
+    if (prev !== state.content) {
+      const nextFromState = buildFormFromContent(state.content);
+      const prevFromState = buildFormFromContent(prev);
+      setForm(cur => {
+        const updated = { ...cur };
+        (Object.keys(nextFromState) as Array<keyof typeof nextFromState>).forEach((k) => {
+          if (nextFromState[k] !== prevFromState[k]) {
+            (updated as any)[k] = nextFromState[k];
+          }
+        });
+        return updated;
+      });
+      prevContentRef.current = state.content;
+    }
+  }, [state.content]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputEl = e.target;
@@ -30,7 +51,8 @@ export const SiteInfoManager: React.FC = () => {
 
     // Check file type
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
-    if (!validTypes.includes(file.type)) {
+    const isExtValid = /\.(png|jpe?g|webp|svg)$/i.test(file.name || '');
+    if (!validTypes.includes(file.type) && !isExtValid) {
       alert('PNG, JPG, JPEG, WEBP 형식의 이미지를 업로드해 주세요.');
       return;
     }
@@ -64,7 +86,16 @@ export const SiteInfoManager: React.FC = () => {
   };
 
   const handleSave = () => {
-    updateContent(form);
+    const baseFromState = buildFormFromContent(state.content);
+    const changed: Record<string, any> = {};
+    (Object.keys(form) as Array<keyof typeof form>).forEach((k) => {
+      if (form[k] !== baseFromState[k]) {
+        changed[k] = form[k];
+      }
+    });
+    if (Object.keys(changed).length > 0) {
+      updateContent(changed);
+    }
     showToast('사이트 기본정보 및 로고 설정이 성공적으로 저장되었습니다.');
   };
 

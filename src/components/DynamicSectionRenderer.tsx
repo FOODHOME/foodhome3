@@ -153,7 +153,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
             return (
               <div key={sec.id} className={`${sizeClass} rounded-3xl overflow-hidden border border-stone-200 shadow-sm bg-white`}>
                 {imgSrc && (
-                  <img src={imgSrc} alt={sec.title || ''} className="w-full h-auto object-cover max-h-[580px]" />
+                  <img src={imgSrc} alt={sec.title || ''} className="w-full h-auto object-cover max-h-[580px] bg-transparent" />
                 )}
                 {(sec.title || sec.content) && (
                   <div className="p-4 sm:p-5 bg-white border-t border-stone-100 text-center">
@@ -512,7 +512,7 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                     <img
                       src={sec.signatureImageUrl}
                       alt="대표이사 서명"
-                      className="h-12 w-auto max-w-[120px] object-contain opacity-90"
+                      className="h-12 w-auto max-w-[120px] object-contain bg-transparent opacity-90"
                     />
                   ) : (
                     <div className="w-14 h-14 rounded-2xl bg-[#872D35]/5 border border-[#872D35]/20 flex flex-col items-center justify-center text-center p-1">

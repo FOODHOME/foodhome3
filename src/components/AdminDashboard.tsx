@@ -125,19 +125,48 @@ export const AdminDashboard: React.FC = () => {
     }
   }, [state.content.navMenus]);
 
-  // Keep contentForm in sync when state.content updates
+  // Keep contentForm in sync when state.content updates (merging changed keys without clobbering unsaved edits)
+  const prevDashboardContentRef = React.useRef(state.content);
   useEffect(() => {
-    setContentForm(state.content);
+    const prev = prevDashboardContentRef.current;
+    if (prev !== state.content) {
+      setContentForm(cur => {
+        const next = { ...cur };
+        const allKeys = new Set([...Object.keys(prev || {}), ...Object.keys(state.content || {})]);
+        allKeys.forEach((key) => {
+          if ((prev as any)[key] !== (state.content as any)[key]) {
+            (next as any)[key] = (state.content as any)[key];
+          }
+        });
+        return next;
+      });
+      prevDashboardContentRef.current = state.content;
+    }
   }, [state.content]);
 
   // Local state for Theme
   const [themeForm, setThemeForm] = useState(state.theme);
+  useEffect(() => {
+    setThemeForm(state.theme);
+  }, [state.theme]);
 
   // Local state for SEO
   const [seoForm, setSeoForm] = useState(state.seo);
+  useEffect(() => {
+    setSeoForm(state.seo);
+  }, [state.seo]);
 
   // Local state for Social
   const [socialForm, setSocialForm] = useState(state.social);
+  useEffect(() => {
+    setSocialForm(state.social);
+  }, [state.social]);
+
+  useEffect(() => {
+    if (state.formspreeEndpoint) {
+      setFormspreeEndpointInput(state.formspreeEndpoint);
+    }
+  }, [state.formspreeEndpoint]);
 
   // Product modal / editing
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -190,7 +219,18 @@ export const AdminDashboard: React.FC = () => {
 
   // Handlers
   const handleSaveContent = () => {
-    updateContent(contentForm);
+    const { pageSections: _preserveSavedSections, ...restForm } = contentForm;
+    const changed: Record<string, any> = {};
+    (Object.keys(restForm) as Array<keyof typeof restForm>).forEach((key) => {
+      if (JSON.stringify(restForm[key]) !== JSON.stringify(state.content[key])) {
+        changed[key] = restForm[key];
+      }
+    });
+    if (Object.keys(changed).length > 0) {
+      updateContent(changed);
+    } else {
+      showToast('사이트 콘텐츠가 성공적으로 저장되었습니다.');
+    }
   };
 
   const handleSaveTheme = () => {

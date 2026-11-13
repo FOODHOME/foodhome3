@@ -180,8 +180,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 facilityItems: Array.isArray(parsed.content?.facilityItems) && parsed.content.facilityItems.length > 0 
                   ? parsed.content.facilityItems 
                   : initialData.content.facilityItems,
-                faqItems: Array.isArray(parsed.content?.faqItems) && parsed.content.faqItems.length > 0 
-                  ? parsed.content.faqItems 
+                faqItems: Array.isArray(parsed.content?.faqItems)
+                  ? parsed.content.faqItems
                   : initialData.content.faqItems,
                 faqCategories: Array.isArray(parsed.content?.faqCategories) && parsed.content.faqCategories.length > 0
                   ? parsed.content.faqCategories
@@ -196,12 +196,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   ? parsed.content.mainSections
                   : initialData.content.mainSections,
                 pageSections: (() => {
-                  const saved = parsed.content?.pageSections;
-                  if (!saved) return undefined;
-                  const introList = saved['about-intro'] || saved['intro'];
+                  const savedSections = parsed.content?.pageSections;
+                  if (!savedSections) return undefined;
+                  const introList = savedSections['about-intro'] || savedSections['intro'];
                   if (Array.isArray(introList) && introList.length > 0) {
-                    const hasSignature = introList.some((s: any) => s.id === 'sec-intro-signature' || s.type === 'signature');
-                    if (!hasSignature) {
+                    const hasModernIntro = introList.some(
+                      (s: any) =>
+                        s.id === 'sec-intro-text-1' ||
+                        s.id === 'sec-intro-image' ||
+                        s.id === 'sec-intro-signature' ||
+                        s.type === 'signature'
+                    );
+                    const isLegacyUntouchedIntro =
+                      !hasModernIntro &&
+                      introList.some((s: any) => s.id === 'sec-intro-ceo' && s.visible !== false);
+                    if (isLegacyUntouchedIntro) {
                       const defs = getDefaultPageSections('about-intro', parsed.content || {});
                       const merged = [
                         ...defs.slice(0, 4),
@@ -213,12 +222,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                         })
                       ];
                       return {
-                        ...saved,
+                        ...savedSections,
                         'about-intro': merged
                       };
                     }
                   }
-                  return saved;
+                  return savedSections;
                 })()
               },
               theme: { 
@@ -239,16 +248,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               products: Array.isArray(parsed.products) && parsed.products.length > 0
                 ? parsed.products
                 : initialData.products,
-              posts: Array.isArray(parsed.posts) && parsed.posts.length > 0
+              posts: Array.isArray(parsed.posts)
                 ? parsed.posts
                 : initialData.posts,
-              reviews: Array.isArray(parsed.reviews) && parsed.reviews.length > 0
+              reviews: Array.isArray(parsed.reviews)
                 ? parsed.reviews
                 : initialData.reviews,
               inquiries: Array.isArray(parsed.inquiries)
                 ? parsed.inquiries
                 : initialData.inquiries,
-              quotes: Array.isArray(parsed.quotes) && parsed.quotes.length > 0
+              quotes: Array.isArray(parsed.quotes)
                 ? parsed.quotes
                 : initialData.quotes,
               formConfig: parsed.formConfig
@@ -430,7 +439,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               if (sec.id === 'sec-intro-image' && newContent.ceoImageUrl !== undefined) {
                 return { ...sec, imageUrl: newContent.ceoImageUrl };
               }
-              if (sec.id === 'sec-intro-signature' || sec.type === 'signature') {
+              if (sec.id === 'sec-intro-signature') {
                 return {
                   ...sec,
                   ...(newContent.ceoRole !== undefined ? { authorRole: newContent.ceoRole } : {}),

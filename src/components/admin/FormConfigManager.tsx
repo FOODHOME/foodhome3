@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { FormConfig, FormFieldItem } from '../../types';
 import { 
@@ -52,6 +52,12 @@ export const FormConfigManager: React.FC = () => {
       quotePrivacyText: '대량 납품 견적 산출 및 유선 안내를 위해 입력하신 정보를 수집 및 처리하며 관련 법령에 따라 철저히 비공개 보호됩니다.'
     };
   });
+
+  useEffect(() => {
+    if (state.formConfig) {
+      setFormConfig(state.formConfig);
+    }
+  }, [state.formConfig]);
 
   const [newProductInput, setNewProductInput] = useState('');
   const [newStatusInput, setNewStatusInput] = useState('');
