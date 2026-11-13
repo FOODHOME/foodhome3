@@ -12,23 +12,6 @@ export const resolveAboutSections = (
   return Array.isArray(prefixed) ? prefixed : (Array.isArray(plain) ? plain : []);
 };
 
-export type SectionTextAlign = 'left' | 'center' | 'right';
-
-export const resolveSectionTextAlign = (
-  sec: Pick<CustomSectionItem, 'id' | 'type' | 'textAlign'>
-): SectionTextAlign => {
-  if (sec.textAlign === 'left' || sec.textAlign === 'center' || sec.textAlign === 'right') {
-    return sec.textAlign;
-  }
-  if (sec.id === 'sec-intro-text-1') {
-    return 'center';
-  }
-  if (sec.type === 'heading' || sec.type === 'button_cta' || sec.type === 'image') {
-    return 'center';
-  }
-  return 'left';
-};
-
 export const getDefaultPageSections = (pageId: string, content: Partial<SiteContent>): CustomSectionItem[] => {
   switch (pageId) {
     case 'about-intro':
@@ -39,7 +22,6 @@ export const getDefaultPageSections = (pageId: string, content: Partial<SiteCont
           type: 'text',
           title: content.ceoTitle || '안녕하세요!\n푸드홈 홈페이지를 찾아주셔서 진심으로 감사드립니다.',
           content: content.ceoGreeting || '푸드홈은 지난 30년간 전국 480여 개 외식 프랜차이즈 및 유명 보쌈·족발 맛집의 든든한 식자재 파트너로 성장해 왔습니다.\n\n외식업 대표님들의 가장 큰 고충인 ‘시간 경과에 따른 물 생김’과 ‘계절별 무의 편차’를 해결하기 위해, 푸드홈은 독자적인 특허 수분제어 절임 공법을 개발하여 언제나 꼬들꼬들하고 청량한 김치를 균일하게 공급하고 있습니다.',
-          textAlign: 'center',
           visible: true,
           order: 1
         },
