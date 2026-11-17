@@ -15,11 +15,24 @@ import {
   Sparkles,
   ExternalLink,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Plus,
+  Trash2,
+  Star,
+  MessageSquareQuote
 } from 'lucide-react';
 
 export const MainSectionsManager: React.FC = () => {
-  const { state, updateMainSections, setActiveAdminTab, showToast } = useApp();
+  const {
+    state,
+    updateMainSections,
+    addReview,
+    updateReview,
+    deleteReview,
+    reorderReviews,
+    setActiveAdminTab,
+    showToast
+  } = useApp();
 
   const defaultSections: MainSectionConfig[] = [
     { id: 'hero', name: '메인 상단 슬라이드 배너', badge: 'HERO BANNER', title: '메인 비주얼 배너', description: '메인 화면 최상단 롤링 배너 슬라이더', visible: true, order: 1 },
@@ -30,7 +43,7 @@ export const MainSectionsManager: React.FC = () => {
     { id: 'products', name: '대표 제품 카탈로그 목록', badge: 'PRODUCT CATALOG', title: '푸드홈 전체 제품 카탈로그', description: '원재료 타협 없이 100% 국산 농산물로 정직하게 제조합니다.', visible: true, order: 6 },
     { id: 'features', name: '30년 전통 비법 & 브랜드 스토리', badge: 'BRAND HERITAGE & PHILOSOPHY', title: '30년 전통 비법과 타협 없는 원칙', description: '시간이 흘러도 물 생김 없는 특허 수분제어 절임 공법', visible: true, order: 7 },
     { id: 'process', name: '안심 위생 제조 공정', badge: 'CLEAN AUTOMATION PROCESS', title: '엄격한 기준의 스마트 클린 제조 시스템', description: '산지 계약재배 입고부터 에어샤워, 금속검출기 통과까지 철저하게 관리합니다.', visible: true, order: 8 },
-    { id: 'reviews', name: '고객사 추천평 (외식업 파트너 후기)', badge: 'PARTNER REVIEWS', title: '전국 480여 개 외식 파트너의 생생한 찬사', description: '고기 맛을 살려주는 보쌈무김치와 김칫속으로 매장 객단가가 상승했습니다.', visible: true, order: 9 },
+    { id: 'reviews', name: '고객사 추천평 (외식업 파트너 후기)', badge: 'PARTNER REVIEWS', title: '전국 프랜차이즈 및 외식업체 대표님들의 후기', description: '고기 맛을 살려주는 보쌈무김치와 김칫속으로 매장 객단가가 상승했습니다.', visible: true, order: 9 },
     { id: 'posts', name: '공지사항 & 외식 레시피 가이드', badge: 'NEWS & NOTICES', title: '푸드홈 공지사항 & 외식 레시피 가이드', description: '위생안전 소식부터 보쌈 매장 사장님들을 위한 조리 꿀팁, 프랜차이즈 납품 소식을 전합니다.', visible: true, order: 10 },
     { id: 'inquiry', name: '하단 1kg 무료 샘플 간편 신청', badge: 'FREE 1KG SAMPLE', title: '직접 맛을 보시고 결정하세요. 1kg 무료 샘플팩 신청 접수 중', description: '사업자등록증을 보유하신 모든 외식업 대표님께 푸드홈 시그니처 보쌈무김치를 무료로 발송해 드립니다.', buttonText: '무료 샘플 1kg 신청하기', buttonLink: 'sample-board-write', visible: true, order: 11 }
   ];
@@ -104,6 +117,15 @@ export const MainSectionsManager: React.FC = () => {
     } else {
       alert(res.error || '이미지 업로드에 실패했습니다.');
     }
+  };
+
+  const handleMoveReview = (idx: number, direction: 'up' | 'down') => {
+    const list = [...(state.reviews || [])];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= list.length) return;
+    const [moved] = list.splice(idx, 1);
+    list.splice(targetIdx, 0, moved);
+    reorderReviews(list);
   };
 
   const activeEditingSection = localSections.find(s => s.id === editingSectionId);
@@ -384,6 +406,171 @@ export const MainSectionsManager: React.FC = () => {
                   <span>이 섹션 변경사항 저장</span>
                 </button>
               </div>
+
+              {/* Partner Reviews CRUD Panel (Only shown when editing 'reviews' section) */}
+              {activeEditingSection.id === 'reviews' && (
+                <div className="pt-5 border-t border-stone-200 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h5 className="text-xs sm:text-sm font-black text-stone-900 flex items-center gap-1.5">
+                        <MessageSquareQuote className="w-4 h-4 text-[#872D35]" />
+                        <span>사장님 후기 목록 관리 (추가 · 수정 · 삭제 · 순서변경)</span>
+                      </h5>
+                      <p className="text-[11px] text-stone-500 mt-0.5">
+                        수정된 내용은 즉시 반영되며, 현재 등록된 {state.reviews.length}건의 후기를 개별 관리할 수 있습니다.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addReview({
+                          clientName: '새 외식 파트너 매장',
+                          businessType: '보쌈·족발 전문점',
+                          location: '서울 강남구',
+                          rating: 5,
+                          comment: '대표님 후기 내용을 입력해 주세요.',
+                          date: new Date().toISOString().slice(0, 10),
+                          verifiedPartner: true
+                        });
+                        showToast('새 후기 카드가 추가되었습니다. 내용을 수정해 주세요.');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ 새 후기 추가</span>
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+                    {state.reviews.map((rev, rIdx) => (
+                      <div
+                        key={rev.id}
+                        className="p-3.5 rounded-xl border border-stone-200 bg-stone-50/70 space-y-2.5 text-xs"
+                      >
+                        <div className="flex items-center justify-between gap-2 border-b border-stone-200/70 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-md bg-stone-200 text-stone-700 font-mono text-[10px] font-bold flex items-center justify-center">
+                              {rIdx + 1}
+                            </span>
+                            <span className="font-bold text-stone-900">{rev.clientName || '업체명 미입력'}</span>
+                            <span className="inline-flex items-center gap-0.5 text-amber-500 text-[11px] font-bold">
+                              <Star className="w-3 h-3 fill-current" />
+                              {rev.rating}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={rIdx === 0}
+                              onClick={() => handleMoveReview(rIdx, 'up')}
+                              className="p-1 text-stone-500 hover:text-stone-900 disabled:opacity-25 cursor-pointer"
+                              title="위로 이동"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={rIdx === state.reviews.length - 1}
+                              onClick={() => handleMoveReview(rIdx, 'down')}
+                              className="p-1 text-stone-500 hover:text-stone-900 disabled:opacity-25 cursor-pointer"
+                              title="아래로 이동"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm(`'${rev.clientName}' 후기를 삭제하시겠습니까?`)) {
+                                  deleteReview(rev.id);
+                                  showToast('후기가 삭제되었습니다.');
+                                }
+                              }}
+                              className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                              title="후기 삭제"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-600 mb-0.5">업체명 / 대표명</label>
+                            <input
+                              type="text"
+                              value={rev.clientName}
+                              onChange={(e) => updateReview(rev.id, { clientName: e.target.value })}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-600 mb-0.5">업종 / 형태</label>
+                            <input
+                              type="text"
+                              value={rev.businessType}
+                              onChange={(e) => updateReview(rev.id, { businessType: e.target.value })}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-stone-600 mb-0.5">지역</label>
+                            <input
+                              type="text"
+                              value={rev.location}
+                              onChange={(e) => updateReview(rev.id, { location: e.target.value })}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-600 mb-0.5">별점</label>
+                              <select
+                                value={rev.rating}
+                                onChange={(e) => updateReview(rev.id, { rating: Number(e.target.value) })}
+                                className="w-full px-2 py-1.5 rounded-lg border border-stone-200 bg-white font-bold"
+                              >
+                                {[5, 4, 3, 2, 1].map((n) => (
+                                  <option key={n} value={n}>{n}점</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-600 mb-0.5">작성일</label>
+                              <input
+                                type="text"
+                                value={rev.date}
+                                onChange={(e) => updateReview(rev.id, { date: e.target.value })}
+                                placeholder="YYYY-MM-DD"
+                                className="w-full px-2 py-1.5 rounded-lg border border-stone-200 bg-white font-mono text-[11px]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-600 mb-0.5">후기 내용</label>
+                          <textarea
+                            rows={2}
+                            value={rev.comment}
+                            onChange={(e) => updateReview(rev.id, { comment: e.target.value })}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-stone-200 bg-white leading-relaxed"
+                          />
+                        </div>
+
+                        <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-stone-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(rev.verifiedPartner)}
+                            onChange={(e) => updateReview(rev.id, { verifiedPartner: e.target.checked })}
+                            className="accent-[#872D35]"
+                          />
+                          <span>인증 파트너 배지 표시</span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="py-16 text-center text-stone-400 space-y-2">

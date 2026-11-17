@@ -5,12 +5,10 @@ import {
   ChevronRight, 
   Pause, 
   Play, 
-  Sparkles, 
   ArrowRight, 
   Package, 
   FileSpreadsheet,
-  ShieldCheck,
-  Truck
+  ShieldCheck
 } from 'lucide-react';
 
 export const HeroSection: React.FC = () => {
@@ -148,19 +146,6 @@ export const HeroSection: React.FC = () => {
                 <FileSpreadsheet className="w-4 h-4 text-[#E8B4B8]" />
                 <span>{current.secondaryButtonText || '1:1 대량 납품 견적 상담'}</span>
               </button>
-            </div>
-
-            {/* SubDescription / Trust Mini Proof */}
-            <div className="pt-2 flex items-center gap-3 text-[11px] text-slate-300 font-medium">
-              <span className="flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                {current.subDescription || '우리 가족 안심 위생시설 제조'}
-              </span>
-              <span>•</span>
-              <span className="flex items-center gap-1">
-                <Truck className="w-3.5 h-3.5 text-[#B64346]" />
-                전국 480+ 매장 당일 냉장 직배송
-              </span>
             </div>
 
           </div>

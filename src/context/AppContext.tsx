@@ -51,6 +51,12 @@ interface AppContextType {
   deletePost: (id: string) => void;
   incrementPostRead: (id: string) => void;
 
+  // Reviews
+  addReview: (review: Omit<ReviewItem, 'id'>) => void;
+  updateReview: (id: string, updates: Partial<ReviewItem>) => void;
+  deleteReview: (id: string) => void;
+  reorderReviews: (reviews: ReviewItem[]) => void;
+
   // FAQ Items & Categories
   addFaqItem: (item: Omit<FaqItem, 'id'>) => void;
   updateFaqItem: (id: string, updates: Partial<FaqItem>) => void;
@@ -193,7 +199,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   ? parsed.content.companySubpages
                   : initialData.content.companySubpages,
                 mainSections: Array.isArray(parsed.content?.mainSections) && parsed.content.mainSections.length > 0
-                  ? parsed.content.mainSections
+                  ? parsed.content.mainSections.map((sec: any) =>
+                      sec.id === 'reviews' && sec.title === '전국 480여 개 외식 파트너의 생생한 찬사'
+                        ? { ...sec, title: '전국 프랜차이즈 및 외식업체 대표님들의 후기' }
+                        : sec
+                    )
                   : initialData.content.mainSections,
                 pageSections: (() => {
                   const savedSections = parsed.content?.pageSections;
@@ -634,6 +644,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       posts: prev.posts.map(p => (p.id === id ? { ...p, readCount: p.readCount + 1 } : p))
     }));
+  };
+
+  const addReview = (review: Omit<ReviewItem, 'id'>) => {
+    const newRev: ReviewItem = {
+      ...review,
+      id: 'rev-' + Date.now()
+    };
+    setState(prev => ({
+      ...prev,
+      reviews: [newRev, ...(prev.reviews || [])]
+    }));
+    showToast('새 파트너 후기가 등록되었습니다.');
+  };
+
+  const updateReview = (id: string, updates: Partial<ReviewItem>) => {
+    setState(prev => ({
+      ...prev,
+      reviews: (prev.reviews || []).map(r => (r.id === id ? { ...r, ...updates } : r))
+    }));
+    showToast('후기 내용이 수정되었습니다.');
+  };
+
+  const deleteReview = (id: string) => {
+    setState(prev => ({
+      ...prev,
+      reviews: (prev.reviews || []).filter(r => r.id !== id)
+    }));
+    showToast('후기가 삭제되었습니다.');
+  };
+
+  const reorderReviews = (reviews: ReviewItem[]) => {
+    setState(prev => ({
+      ...prev,
+      reviews
+    }));
+    showToast('후기 표시 순서가 변경되었습니다.');
   };
 
   const addFaqItem = (item: Omit<FaqItem, 'id'>) => {
@@ -1227,6 +1273,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updatePost,
         deletePost,
         incrementPostRead,
+        addReview,
+        updateReview,
+        deleteReview,
+        reorderReviews,
         addInquiry,
         updateInquiryStatus,
         deleteInquiry,

@@ -192,14 +192,19 @@ const MainContent: React.FC = () => {
       <div className="fixed bottom-5 right-5 z-40 flex items-center gap-2">
         <button
           onClick={() => {
-            setActivePage('sample-board-write');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            const dest = (state.content.floatingSampleLink || 'sample-board-write').trim();
+            if (dest.startsWith('http://') || dest.startsWith('https://')) {
+              window.open(dest, '_blank', 'noopener,noreferrer');
+            } else {
+              setActivePage(dest || 'sample-board-write');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
           }}
           className="hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-full text-white text-xs font-extrabold shadow-xl hover:opacity-95 transition-all hover:scale-105 cursor-pointer"
           style={{ backgroundColor: state.theme.primaryColor || '#872D35' }}
         >
           <Sparkles className="w-4 h-4 text-amber-300" />
-          <span>무료 샘플 1kg 신청</span>
+          <span>{state.content.floatingSampleText || '무료샘플신청'}</span>
         </button>
 
         <button

@@ -29,7 +29,7 @@ export const SectionContentModal: React.FC<SectionContentModalProps> = ({
   isOpen,
   onClose
 }) => {
-  const { state, updateContent, showToast } = useApp();
+  const { state, updateContent, addReview, updateReview, deleteReview, reorderReviews, showToast } = useApp();
   const { content } = state;
 
   const [formContent, setFormContent] = useState(content);
@@ -48,6 +48,15 @@ export const SectionContentModal: React.FC<SectionContentModalProps> = ({
       ...prev,
       [field]: value
     }));
+  };
+
+  const handleMoveReview = (idx: number, direction: 'up' | 'down') => {
+    const list = [...(state.reviews || [])];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= list.length) return;
+    const [moved] = list.splice(idx, 1);
+    list.splice(targetIdx, 0, moved);
+    reorderReviews(list);
   };
 
   const handleSave = () => {
@@ -348,23 +357,117 @@ export const SectionContentModal: React.FC<SectionContentModalProps> = ({
           {/* 5. 고객사 추천평 */}
           {sectionKey === 'reviews' && (
             <div className="space-y-4">
-              <div className="p-4 bg-stone-50 rounded-xl border border-stone-200">
-                <h4 className="text-xs font-black text-stone-800 mb-1">고객사 추천평 관리</h4>
-                <p className="text-xs text-stone-600 mb-4">
-                  전국 외식업 점주님들의 생생한 후기와 평점을 관리합니다.
-                </p>
+              <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-xs font-black text-stone-800 mb-0.5">고객사 추천평 관리 ({state.reviews.length}건)</h4>
+                    <p className="text-[11px] text-stone-600">
+                      전국 외식업 대표님들의 후기를 추가, 수정, 삭제, 순서변경할 수 있습니다.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addReview({
+                        clientName: '새 외식 파트너 매장',
+                        businessType: '보쌈·족발 전문점',
+                        location: '서울 강남구',
+                        rating: 5,
+                        comment: '대표님 후기 내용을 입력해 주세요.',
+                        date: new Date().toISOString().slice(0, 10),
+                        verifiedPartner: true
+                      });
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ 새 후기 추가</span>
+                  </button>
+                </div>
 
                 <div className="space-y-3">
-                  {(state.reviews || []).slice(0, 5).map((rev, idx) => (
-                    <div key={rev.id || idx} className="p-3 bg-white rounded-lg border border-stone-200 space-y-1">
-                      <div className="flex items-center justify-between text-xs font-bold text-stone-800">
-                        <span>{rev.clientName} ({rev.businessType})</span>
-                        <div className="flex items-center text-amber-500">
-                          <Star className="w-3.5 h-3.5 fill-current" />
-                          <span className="text-[11px] font-bold ml-1">{rev.rating}점</span>
+                  {(state.reviews || []).map((rev, idx) => (
+                    <div key={rev.id || idx} className="p-3 bg-white rounded-lg border border-stone-200 space-y-2 text-xs">
+                      <div className="flex items-center justify-between border-b border-stone-100 pb-1.5">
+                        <span className="font-bold text-stone-800">#{idx + 1} {rev.clientName || '업체명 미입력'}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => handleMoveReview(idx, 'up')}
+                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-25 cursor-pointer"
+                          >
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === state.reviews.length - 1}
+                            onClick={() => handleMoveReview(idx, 'down')}
+                            className="p-1 text-stone-400 hover:text-stone-800 disabled:opacity-25 cursor-pointer"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm(`'${rev.clientName}' 후기를 삭제하시겠습니까?`)) {
+                                deleteReview(rev.id);
+                              }
+                            }}
+                            className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                      <p className="text-xs text-stone-600">{rev.comment}</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={rev.clientName}
+                          onChange={(e) => updateReview(rev.id, { clientName: e.target.value })}
+                          placeholder="업체명 / 대표명"
+                          className="px-2.5 py-1.5 border border-stone-200 rounded-lg font-bold"
+                        />
+                        <input
+                          type="text"
+                          value={rev.businessType}
+                          onChange={(e) => updateReview(rev.id, { businessType: e.target.value })}
+                          placeholder="업종"
+                          className="px-2.5 py-1.5 border border-stone-200 rounded-lg"
+                        />
+                        <input
+                          type="text"
+                          value={rev.location}
+                          onChange={(e) => updateReview(rev.id, { location: e.target.value })}
+                          placeholder="지역"
+                          className="px-2.5 py-1.5 border border-stone-200 rounded-lg"
+                        />
+                        <div className="grid grid-cols-2 gap-2">
+                          <select
+                            value={rev.rating}
+                            onChange={(e) => updateReview(rev.id, { rating: Number(e.target.value) })}
+                            className="px-2 py-1.5 border border-stone-200 rounded-lg font-bold"
+                          >
+                            {[5, 4, 3, 2, 1].map((n) => (
+                              <option key={n} value={n}>{n}점</option>
+                            ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={rev.date}
+                            onChange={(e) => updateReview(rev.id, { date: e.target.value })}
+                            placeholder="YYYY-MM-DD"
+                            className="px-2 py-1.5 border border-stone-200 rounded-lg font-mono text-[11px]"
+                          />
+                        </div>
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={rev.comment}
+                        onChange={(e) => updateReview(rev.id, { comment: e.target.value })}
+                        placeholder="후기 내용"
+                        className="w-full px-2.5 py-1.5 border border-stone-200 rounded-lg"
+                      />
                     </div>
                   ))}
                 </div>

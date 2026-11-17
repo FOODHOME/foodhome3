@@ -69,6 +69,8 @@ export interface CustomSectionItem {
   content?: string;
   imageUrl?: string;
   images?: string[];
+  imageCaptions?: string[];
+  imageAspectRatio?: '4-3' | 'a4' | 'square';
   videoUrl?: string;
   imagePosition?: 'left' | 'right' | 'top';
   imageSize?: 'small' | 'medium' | 'large' | 'full';
@@ -206,6 +208,18 @@ export interface SiteContent {
   csHours: string;
   lunchHours: string;
   footerNotice?: string;
+  footerIntroText?: string;
+  footerBadge1?: string;
+  footerBadge2?: string;
+  footerSmartStoreLabel?: string;
+  footerBlogLabel?: string;
+  footerKakaoLabel?: string;
+  footerQuickSampleText?: string;
+  footerQuickSampleLink?: string;
+  footerQuickQuoteText?: string;
+  footerQuickQuoteLink?: string;
+  floatingSampleText?: string;
+  floatingSampleLink?: string;
 
   // Story & Brand Info
   storyTitle: string;

@@ -3,7 +3,6 @@ import { useApp } from '../context/AppContext';
 import { 
   Star, 
   Quote, 
-  Store, 
   BadgeCheck 
 } from 'lucide-react';
 
@@ -12,11 +11,10 @@ import { MainSectionConfig } from '../types';
 export const PartnersAndReviews: React.FC<{ config?: MainSectionConfig }> = ({ config }) => {
   const { state } = useApp();
   const cfg = config || state.content.mainSections?.find(s => s.id === 'reviews');
-
-  const partnerBrands = [
-    '한양왕족발', '도담보쌈 본점', '원조 장충동할매족발', '제주흑돈명가', 
-    '인생수육국밥', '삼산회관 협력점', '정통 굴보쌈마을', '황금돼지정육식당'
-  ];
+  const resolvedTitle =
+    cfg?.title && cfg.title !== '전국 480여 개 외식 파트너의 생생한 찬사'
+      ? cfg.title
+      : '전국 프랜차이즈 및 외식업체 대표님들의 후기';
 
   return (
     <section id="review-section" className="py-12 bg-white border-b border-[#E8E2DC]">
@@ -28,29 +26,11 @@ export const PartnersAndReviews: React.FC<{ config?: MainSectionConfig }> = ({ c
             <span>{cfg?.badge || 'PARTNER TESTIMONIALS'}</span>
           </div>
           <h2 className="text-2xl sm:text-3xl font-extrabold text-[#2A2020] tracking-tight">
-            {cfg?.title || '전국 480여 개 외식 매장이 푸드홈을 신뢰하는 이유'}
+            {resolvedTitle}
           </h2>
           <p className="text-xs sm:text-sm text-slate-600 font-normal">
             {cfg?.description || '손님들의 재방문을 부르고 주방 인건비와 음식물 손실을 획기적으로 줄인 실제 사장님들의 솔직한 평가입니다.'}
           </p>
-        </div>
-
-        {/* Partner Brands Grid/Row */}
-        <div className="mb-8 p-4 rounded-xl bg-[#FAF8F5] border border-[#E8E2DC]">
-          <div className="text-center text-[11px] font-bold text-[#872D35] mb-2.5 uppercase tracking-wider">
-            전국 주요 납품 외식 프랜차이즈 & 지역 맛집 파트너사
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            {partnerBrands.map((brand, idx) => (
-              <div 
-                key={idx}
-                className="px-3 py-1 rounded-md bg-white border border-[#E8E2DC] text-xs font-bold text-stone-700 shadow-2xs flex items-center gap-1.5"
-              >
-                <Store className="w-3.5 h-3.5 text-[#872D35]" />
-                <span>{brand}</span>
-              </div>
-            ))}
-          </div>
         </div>
 
         {/* Reviews Grid */}

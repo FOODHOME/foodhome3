@@ -1124,6 +1124,7 @@ export const ContentManager: React.FC = () => {
                 subtitle="페이지에 노출되는 이미지, 소개글, 특징 카드, 프로세스, CTA 안내 블록을 자유롭게 추가·수정·순서변경합니다."
                 sections={resolveAboutSections(contentForm.pageSections, currentSubpage.id)}
                 fallbackSections={getDefaultPageSections(`about-${currentSubpage.id}`, contentForm)}
+                defaultMultiImageAspect={currentSubpage.id === 'permits' ? 'a4' : undefined}
                 onChange={(newSecs) => {
                   const linkedUpdates: Record<string, any> = {};
                   if (currentSubpage.id === 'intro') {

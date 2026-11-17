@@ -592,7 +592,7 @@ export const initialData: AppState = {
         id: 'reviews',
         name: '외식업 파트너 후기 & 신뢰 지표',
         badge: 'PARTNER STORIES',
-        title: '전국 480여 개 외식 파트너의 생생한 찬사',
+        title: '전국 프랜차이즈 및 외식업체 대표님들의 후기',
         description: '고기 맛을 살려주는 보쌈무김치와 김칫속으로 매장 객단가가 상승했습니다.',
         visible: true,
         order: 9

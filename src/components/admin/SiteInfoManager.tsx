@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { uploadImageToStorage } from '../../lib/supabase';
-import { Building, Phone, Mail, MapPin, Printer, Clock, FileText, Save, Image as ImageIcon, Upload, RotateCcw } from 'lucide-react';
+import { Building, Phone, Mail, MapPin, Printer, Clock, FileText, Save, Image as ImageIcon, Upload, RotateCcw, Globe, MousePointerClick } from 'lucide-react';
 import { FoodhomeLogo } from '../FoodhomeLogo';
 
 export const SiteInfoManager: React.FC = () => {
-  const { state, updateContent, showToast } = useApp();
+  const { state, updateContent, updateSocial, showToast } = useApp();
   const buildFormFromContent = (c: typeof state.content) => ({
     logoUrl: c.logoUrl || '',
     headerLogoWidth: c.headerLogoWidth || 160,
@@ -19,11 +19,31 @@ export const SiteInfoManager: React.FC = () => {
     fax: c.fax,
     email: c.email,
     csHours: c.csHours,
-    footerNotice: c.footerNotice || '본 사이트의 모든 콘텐츠, 이미지, 제품 디자인은 (주)푸드홈의 자산이며 무단 도용을 금합니다.'
+    footerNotice: c.footerNotice || '본 사이트의 모든 콘텐츠, 이미지, 제품 디자인은 (주)푸드홈의 자산이며 무단 도용을 금합니다.',
+    footerIntroText: c.footerIntroText || `${c.tagline}. 대한민국 대표 보쌈무김치, 무김치, 명품 김칫속(보쌈속) 수제 제조 전문 기업 푸드홈입니다.`,
+    footerBadge1: c.footerBadge1 || '우리 가족 안심 먹거리',
+    footerBadge2: c.footerBadge2 || '전국 콜드체인 익일 직배송',
+    footerSmartStoreLabel: c.footerSmartStoreLabel || '네이버 스마트스토어',
+    footerBlogLabel: c.footerBlogLabel || '네이버 블로그',
+    footerKakaoLabel: c.footerKakaoLabel || '카카오톡 채널',
+    footerQuickSampleText: c.footerQuickSampleText || '무료샘플신청',
+    footerQuickSampleLink: c.footerQuickSampleLink || 'sample-board-write',
+    footerQuickQuoteText: c.footerQuickQuoteText || '1:1 대량 납품 견적 상담',
+    footerQuickQuoteLink: c.footerQuickQuoteLink || 'quote-board-write',
+    floatingSampleText: c.floatingSampleText || '무료샘플신청',
+    floatingSampleLink: c.floatingSampleLink || 'sample-board-write'
+  });
+
+  const buildSocialForm = (s: typeof state.social) => ({
+    smartStoreUrl: s.smartStoreUrl || '',
+    naverBlogUrl: s.naverBlogUrl || '',
+    kakaoTalkUrl: s.kakaoTalkUrl || ''
   });
 
   const [form, setForm] = useState(() => buildFormFromContent(state.content));
+  const [socialForm, setSocialForm] = useState(() => buildSocialForm(state.social));
   const prevContentRef = useRef(state.content);
+  const prevSocialRef = useRef(state.social);
 
   useEffect(() => {
     const prev = prevContentRef.current;
@@ -42,6 +62,24 @@ export const SiteInfoManager: React.FC = () => {
       prevContentRef.current = state.content;
     }
   }, [state.content]);
+
+  useEffect(() => {
+    const prev = prevSocialRef.current;
+    if (prev !== state.social) {
+      const nextFromState = buildSocialForm(state.social);
+      const prevFromState = buildSocialForm(prev);
+      setSocialForm(cur => {
+        const updated = { ...cur };
+        (Object.keys(nextFromState) as Array<keyof typeof nextFromState>).forEach((k) => {
+          if (nextFromState[k] !== prevFromState[k]) {
+            updated[k] = nextFromState[k];
+          }
+        });
+        return updated;
+      });
+      prevSocialRef.current = state.social;
+    }
+  }, [state.social]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputEl = e.target;
@@ -96,7 +134,19 @@ export const SiteInfoManager: React.FC = () => {
     if (Object.keys(changed).length > 0) {
       updateContent(changed);
     }
-    showToast('사이트 기본정보 및 로고 설정이 성공적으로 저장되었습니다.');
+
+    const baseSocialFromState = buildSocialForm(state.social);
+    const changedSocial: Record<string, string> = {};
+    (Object.keys(socialForm) as Array<keyof typeof socialForm>).forEach((k) => {
+      if (socialForm[k] !== baseSocialFromState[k]) {
+        changedSocial[k] = socialForm[k];
+      }
+    });
+    if (Object.keys(changedSocial).length > 0) {
+      updateSocial(changedSocial);
+    }
+
+    showToast('사이트 기본정보 및 푸터/로고 설정이 성공적으로 저장되었습니다.');
   };
 
   return (
@@ -440,6 +490,193 @@ export const SiteInfoManager: React.FC = () => {
             onChange={(e) => setForm({ ...form, footerNotice: e.target.value })}
             className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs focus:outline-none focus:border-[#872D35]"
           />
+        </div>
+      </div>
+
+      {/* Footer Brand Copy, Badges, Channels & CTA Links */}
+      <div className="bg-white p-6 sm:p-8 rounded-2xl border border-stone-200 shadow-2xs space-y-5">
+        <h4 className="text-sm font-black text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
+          <Globe className="w-4 h-4 text-[#872D35]" />
+          <span>하단(푸터) 문구 · 배지 · 채널 링크 · 샘플 버튼 관리</span>
+        </h4>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-stone-700 mb-1">푸터 회사 소개 문구</label>
+            <textarea
+              rows={2}
+              value={form.footerIntroText}
+              onChange={(e) => setForm({ ...form, footerIntroText: e.target.value })}
+              className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs focus:outline-none focus:border-[#872D35] leading-relaxed"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1">푸터 강조 배지 1</label>
+              <input
+                type="text"
+                value={form.footerBadge1}
+                onChange={(e) => setForm({ ...form, footerBadge1: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1">푸터 강조 배지 2</label>
+              <input
+                type="text"
+                value={form.footerBadge2}
+                onChange={(e) => setForm({ ...form, footerBadge2: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Social / External Channel Buttons */}
+        <div className="pt-3 border-t border-stone-100 space-y-3">
+          <p className="text-xs font-bold text-stone-800">채널 바로가기 버튼 명칭 및 연결 URL</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">스마트스토어 버튼명</label>
+              <input
+                type="text"
+                value={form.footerSmartStoreLabel}
+                onChange={(e) => setForm({ ...form, footerSmartStoreLabel: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">스마트스토어 URL</label>
+              <input
+                type="text"
+                value={socialForm.smartStoreUrl}
+                onChange={(e) => setSocialForm({ ...socialForm, smartStoreUrl: e.target.value })}
+                placeholder="https://smartstore.naver.com/..."
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">블로그 버튼명</label>
+              <input
+                type="text"
+                value={form.footerBlogLabel}
+                onChange={(e) => setForm({ ...form, footerBlogLabel: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">블로그 URL</label>
+              <input
+                type="text"
+                value={socialForm.naverBlogUrl}
+                onChange={(e) => setSocialForm({ ...socialForm, naverBlogUrl: e.target.value })}
+                placeholder="https://blog.naver.com/..."
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">카카오톡 채널 버튼명</label>
+              <input
+                type="text"
+                value={form.footerKakaoLabel}
+                onChange={(e) => setForm({ ...form, footerKakaoLabel: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">카카오톡 채널 URL</label>
+              <input
+                type="text"
+                value={socialForm.kakaoTalkUrl}
+                onChange={(e) => setSocialForm({ ...socialForm, kakaoTalkUrl: e.target.value })}
+                placeholder="https://pf.kakao.com/..."
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-mono"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Service & Floating CTA Buttons */}
+        <div className="pt-3 border-t border-stone-100 space-y-3">
+          <p className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
+            <MousePointerClick className="w-3.5 h-3.5 text-[#872D35]" />
+            <span>QUICK SERVICE 및 우측 하단 플로팅 버튼 설정</span>
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">푸터 Quick Service 샘플 버튼 문구</label>
+              <input
+                type="text"
+                value={form.footerQuickSampleText}
+                onChange={(e) => setForm({ ...form, footerQuickSampleText: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">푸터 Quick Service 샘플 연결 페이지/URL</label>
+              <input
+                type="text"
+                value={form.footerQuickSampleLink}
+                onChange={(e) => setForm({ ...form, footerQuickSampleLink: e.target.value })}
+                placeholder="sample-board-write"
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">푸터 Quick Service 견적 버튼 문구</label>
+              <input
+                type="text"
+                value={form.footerQuickQuoteText}
+                onChange={(e) => setForm({ ...form, footerQuickQuoteText: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">푸터 Quick Service 견적 연결 페이지/URL</label>
+              <input
+                type="text"
+                value={form.footerQuickQuoteLink}
+                onChange={(e) => setForm({ ...form, footerQuickQuoteLink: e.target.value })}
+                placeholder="quote-board-write"
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">우측 하단 플로팅 샘플 버튼 문구</label>
+              <input
+                type="text"
+                value={form.floatingSampleText}
+                onChange={(e) => setForm({ ...form, floatingSampleText: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-stone-600 mb-1">우측 하단 플로팅 샘플 연결 페이지/URL</label>
+              <input
+                type="text"
+                value={form.floatingSampleLink}
+                onChange={(e) => setForm({ ...form, floatingSampleLink: e.target.value })}
+                placeholder="sample-board-write"
+                className="w-full px-3 py-2 rounded-lg border border-stone-200 text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-6 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-extrabold shadow-sm flex items-center gap-1.5 cursor-pointer transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              <span>기본정보 및 푸터 설정 저장</span>
+            </button>
+          </div>
         </div>
       </div>
 

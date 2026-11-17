@@ -22,6 +22,16 @@ export const Footer: React.FC = () => {
   } = useApp();
   const { content, social } = state;
 
+  const handleQuickAction = (target?: string, fallbackPage = 'sample-board-write') => {
+    const dest = (target || fallbackPage).trim();
+    if (dest.startsWith('http://') || dest.startsWith('https://')) {
+      window.open(dest, '_blank', 'noopener,noreferrer');
+    } else {
+      setActivePage(dest || fallbackPage);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   return (
     <footer id="footer-section" className="bg-[#221A1A] text-stone-300 pt-10 pb-8 border-t border-[#3D3131]">
       <div className="max-w-7xl mx-auto px-4 sm:px-8">
@@ -33,19 +43,19 @@ export const Footer: React.FC = () => {
           <div className="lg:col-span-5 space-y-3">
             <FoodhomeLogo variant="light" placement="footer" />
 
-            <p className="text-xs text-stone-400 leading-relaxed max-w-sm font-normal">
-              {content.tagline}. 대한민국 대표 보쌈무김치, 무김치, 명품 김칫속(보쌈속) 수제 제조 전문 기업 푸드홈입니다.
+            <p className="text-xs text-stone-400 leading-relaxed max-w-sm font-normal whitespace-pre-line">
+              {content.footerIntroText || `${content.tagline}. 대한민국 대표 보쌈무김치, 무김치, 명품 김칫속(보쌈속) 수제 제조 전문 기업 푸드홈입니다.`}
             </p>
 
             {/* Quick Badges */}
             <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-stone-300">
               <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/10">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                우리 가족 안심 먹거리
+                {content.footerBadge1 || '우리 가족 안심 먹거리'}
               </span>
               <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/10">
                 <Truck className="w-3.5 h-3.5 text-[#B64346]" />
-                전국 콜드체인 익일 직배송
+                {content.footerBadge2 || '전국 콜드체인 익일 직배송'}
               </span>
             </div>
 
@@ -58,7 +68,7 @@ export const Footer: React.FC = () => {
                   rel="noreferrer"
                   className="px-2.5 py-1 text-xs rounded bg-[#03C75A]/20 text-[#03C75A] hover:bg-[#03C75A]/30 transition-colors font-bold flex items-center gap-1"
                 >
-                  <span>네이버 스마트스토어</span>
+                  <span>{content.footerSmartStoreLabel || '네이버 스마트스토어'}</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               )}
@@ -69,7 +79,7 @@ export const Footer: React.FC = () => {
                   rel="noreferrer"
                   className="px-2.5 py-1 text-xs rounded bg-white/10 text-stone-200 hover:bg-white/20 transition-colors font-medium"
                 >
-                  네이버 블로그
+                  {content.footerBlogLabel || '네이버 블로그'}
                 </a>
               )}
               {social.kakaoTalkUrl && (
@@ -79,7 +89,7 @@ export const Footer: React.FC = () => {
                   rel="noreferrer"
                   className="px-2.5 py-1 text-xs rounded bg-amber-400/20 text-amber-300 hover:bg-amber-400/30 transition-colors font-medium"
                 >
-                  카카오톡 채널
+                  {content.footerKakaoLabel || '카카오톡 채널'}
                 </a>
               )}
             </div>
@@ -115,25 +125,19 @@ export const Footer: React.FC = () => {
             
             <div className="space-y-2">
               <button
-                onClick={() => {
-                  setActivePage('sample-board-write');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleQuickAction(content.footerQuickSampleLink, 'sample-board-write')}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-bold transition-all shadow-xs cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>사업자 무료 샘플 1kg 신청</span>
+                <span>{content.footerQuickSampleText || '무료샘플신청'}</span>
               </button>
 
               <button
-                onClick={() => {
-                  setActivePage('quote-board-write');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleQuickAction(content.footerQuickQuoteLink, 'quote-board-write')}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-stone-200 text-xs font-bold transition-all cursor-pointer"
               >
                 <Truck className="w-3.5 h-3.5 text-[#B64346]" />
-                <span>1:1 대량 납품 견적 상담</span>
+                <span>{content.footerQuickQuoteText || '1:1 대량 납품 견적 상담'}</span>
               </button>
 
               <button
@@ -164,7 +168,7 @@ export const Footer: React.FC = () => {
           </div>
 
           <div className="pt-3 border-t border-[#3D3131] mt-3 flex flex-col sm:flex-row items-center justify-between text-stone-500 gap-2">
-            <p>© 2026 {content.companyName} Co., Ltd. All Rights Reserved. 본 사이트의 콘텐츠 및 이미지 무단 전재 및 복제를 금합니다.</p>
+            <p>© 2026 {content.companyName} Co., Ltd. All Rights Reserved. {content.footerNotice || '본 사이트의 콘텐츠 및 이미지 무단 전재 및 복제를 금합니다.'}</p>
             <p className="text-[10px]">Modern Korean Food Brand Website</p>
           </div>
         </div>

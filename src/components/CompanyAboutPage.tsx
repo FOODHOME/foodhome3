@@ -172,6 +172,7 @@ export const CompanyAboutPage: React.FC<CompanyAboutPageProps> = ({ targetTab })
           <DynamicSectionRenderer
             sections={resolveAboutSections(content.pageSections, 'permits')}
             fallbackSections={getDefaultPageSections('about-permits', content)}
+            defaultMultiImageAspect="a4"
           />
         )}
 

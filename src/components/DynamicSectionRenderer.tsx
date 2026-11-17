@@ -31,11 +31,13 @@ const ICON_MAP: Record<string, any> = {
 interface DynamicSectionRendererProps {
   sections: CustomSectionItem[];
   fallbackSections?: CustomSectionItem[];
+  defaultMultiImageAspect?: '4-3' | 'a4' | 'square';
 }
 
 export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({ 
   sections,
-  fallbackSections 
+  fallbackSections,
+  defaultMultiImageAspect
 }) => {
   const { setActivePage, setIsSampleModalOpen, setIsWholesaleModalOpen } = useApp();
 
@@ -330,7 +332,27 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
 
           // 5. Multiple Images (Gallery)
           case 'multi_image': {
-            const validImages = (sec.images || []).map((img) => img?.trim()).filter(Boolean) as string[];
+            const rawImages = sec.images || [];
+            const rawCaptions = sec.imageCaptions || [];
+            const validItems = rawImages
+              .map((img, idx) => ({ url: (img || '').trim(), caption: rawCaptions[idx] || '' }))
+              .filter((item) => Boolean(item.url));
+            const ratio = sec.imageAspectRatio || defaultMultiImageAspect || '4-3';
+            const gridClass =
+              ratio === 'a4'
+                ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5'
+                : 'grid-cols-2 md:grid-cols-3 gap-4';
+            const frameClass =
+              ratio === 'a4'
+                ? 'rounded-2xl overflow-hidden border border-stone-200 bg-white aspect-[210/297] flex items-center justify-center p-2'
+                : ratio === 'square'
+                  ? 'rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 aspect-square'
+                  : 'rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 aspect-4/3';
+            const imgClass =
+              ratio === 'a4'
+                ? 'w-full h-full object-contain'
+                : 'w-full h-full object-cover hover:scale-105 transition-transform';
+
             return (
               <div key={sec.id} className="bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm space-y-6">
                 {(sec.title || sec.subtitle) && (
@@ -342,11 +364,21 @@ export const DynamicSectionRenderer: React.FC<DynamicSectionRendererProps> = ({
                     {sec.subtitle && <p className="text-xs sm:text-sm text-stone-600 mt-1">{sec.subtitle}</p>}
                   </div>
                 )}
-                {validImages.length > 0 ? (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {validImages.map((img, iIdx) => (
-                      <div key={iIdx} className="rounded-2xl overflow-hidden border border-stone-200 bg-stone-100 aspect-4/3">
-                        <img src={img} alt="" className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                {validItems.length > 0 ? (
+                  <div className={`grid ${gridClass}`}>
+                    {validItems.map((item, iIdx) => (
+                      <div key={iIdx} className="flex flex-col">
+                        <div className={frameClass}>
+                          <img src={item.url} alt={item.caption || ''} className={imgClass} />
+                        </div>
+                        {item.caption.trim() && (
+                          <p
+                            className="mt-2 text-xs sm:text-sm font-bold text-stone-800 text-center truncate"
+                            title={item.caption}
+                          >
+                            {item.caption}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>

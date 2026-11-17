@@ -37,6 +37,7 @@ interface SectionManagerProps {
   fallbackSections?: CustomSectionItem[];
   onChange: (updatedSections: CustomSectionItem[]) => void;
   onSave?: () => void;
+  defaultMultiImageAspect?: '4-3' | 'a4' | 'square';
 }
 
 const SECTION_TYPE_LABELS: Record<string, { label: string; desc: string; icon: any }> = {
@@ -59,7 +60,8 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
   sections,
   fallbackSections = [],
   onChange,
-  onSave
+  onSave,
+  defaultMultiImageAspect
 }) => {
   // Current active sections: if empty, display fallback sections as editable template
   const currentSections = sections && sections.length > 0 ? sections : fallbackSections;
@@ -125,13 +127,25 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
   const handleSaveModal = () => {
     if (!editingSection || isUploading) return;
 
+    let syncedImages: string[] | undefined;
+    let syncedCaptions: string[] | undefined;
+    if (Array.isArray(editingSection.images)) {
+      const rawCaptions = editingSection.imageCaptions || [];
+      const pairs = editingSection.images
+        .map((u, idx) => ({ url: (u || '').trim(), caption: (rawCaptions[idx] || '').trim() }))
+        .filter((p) => Boolean(p.url));
+      syncedImages = pairs.map((p) => p.url);
+      if (editingSection.imageCaptions || pairs.some((p) => Boolean(p.caption))) {
+        syncedCaptions = pairs.map((p) => p.caption);
+      }
+    }
+
     const cleaned: CustomSectionItem = {
       ...editingSection,
       ...(typeof editingSection.imageUrl === 'string' ? { imageUrl: editingSection.imageUrl.trim() } : {}),
       ...(typeof editingSection.signatureImageUrl === 'string' ? { signatureImageUrl: editingSection.signatureImageUrl.trim() } : {}),
-      ...(Array.isArray(editingSection.images)
-        ? { images: editingSection.images.map((u) => (u || '').trim()).filter(Boolean) }
-        : {})
+      ...(syncedImages !== undefined ? { images: syncedImages } : {}),
+      ...(syncedCaptions !== undefined ? { imageCaptions: syncedCaptions } : {})
     };
 
     if (cleaned.type === 'image' && !cleaned.imageUrl && !cleaned.title?.trim() && !cleaned.content?.trim()) {
@@ -730,75 +744,181 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
               )}
 
               {/* 6. Multi-Image Gallery */}
-              {editingSection.type === 'multi_image' && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-stone-700">갤러리 이미지 목록</label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingSection(prev => {
-                          if (!prev) return prev;
-                          const cur = prev.images || [];
-                          return { ...prev, images: [...cur, ''] };
-                        });
-                      }}
-                      className="text-xs font-bold text-[#872D35] hover:underline cursor-pointer"
-                    >
-                      + 이미지 추가
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {(editingSection.images || []).map((imgUrl, i) => (
-                      <div key={i} className="flex items-center gap-2">
-                        {imgUrl?.trim() && (
-                          <div className="w-10 h-10 rounded-lg overflow-hidden border border-stone-200 bg-stone-100 shrink-0">
-                            <img src={imgUrl} alt="" className="w-full h-full object-cover" />
-                          </div>
-                        )}
-                        <input
-                          type="text"
-                          value={imgUrl}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setEditingSection(prev => {
-                              if (!prev) return prev;
-                              const cur = [...(prev.images || [])];
-                              cur[i] = val;
-                              return { ...prev, images: cur };
-                            });
-                          }}
-                          placeholder={`이미지 #${i + 1} URL`}
-                          className="flex-1 px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-mono bg-white"
-                        />
-                        <label className="px-2.5 py-1.5 rounded-lg bg-stone-800 text-white text-xs font-bold cursor-pointer shrink-0">
-                          <span>{isUploading ? '업로드 중...' : '업로드'}</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            disabled={isUploading}
-                            onChange={(e) => handleUploadImage({ type: 'multi', index: i }, e)}
-                            className="hidden"
-                          />
-                        </label>
+              {editingSection.type === 'multi_image' && (() => {
+                const activeRatio = editingSection.imageAspectRatio || defaultMultiImageAspect || '4-3';
+                const moveMultiImage = (idx: number, dir: 'up' | 'down') => {
+                  setEditingSection((prev) => {
+                    if (!prev) return prev;
+                    const imgs = [...(prev.images || [])];
+                    const caps = imgs.map((_, cIdx) => (prev.imageCaptions || [])[cIdx] || '');
+                    const target = dir === 'up' ? idx - 1 : idx + 1;
+                    if (target < 0 || target >= imgs.length) return prev;
+                    const [mImg] = imgs.splice(idx, 1);
+                    const [mCap] = caps.splice(idx, 1);
+                    imgs.splice(target, 0, mImg);
+                    caps.splice(target, 0, mCap);
+                    return { ...prev, images: imgs, imageCaptions: caps };
+                  });
+                };
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-stone-700">갤러리 이미지 비율 및 목록</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSection((prev) => {
+                            if (!prev) return prev;
+                            const cur = prev.images || [];
+                            const caps = cur.map((_, cIdx) => (prev.imageCaptions || [])[cIdx] || '');
+                            return { ...prev, images: [...cur, ''], imageCaptions: [...caps, ''] };
+                          });
+                        }}
+                        className="text-xs font-bold text-[#872D35] hover:underline cursor-pointer"
+                      >
+                        + 이미지 추가
+                      </button>
+                    </div>
+
+                    {/* Aspect Ratio Selector */}
+                    <div className="p-2.5 rounded-xl bg-stone-50 border border-stone-200 flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-bold text-stone-600 mr-1">이미지 비율:</span>
+                      {[
+                        { val: 'a4' as const, label: 'A4 세로 비율 (210:297 · 문서/인증서)' },
+                        { val: '4-3' as const, label: '기본 가로 (4:3)' },
+                        { val: 'square' as const, label: '정사각형 (1:1)' }
+                      ].map((opt) => (
                         <button
+                          key={opt.val}
                           type="button"
-                          onClick={() => {
-                            setEditingSection(prev => {
-                              if (!prev) return prev;
-                              const cur = (prev.images || []).filter((_, idx) => idx !== i);
-                              return { ...prev, images: cur };
-                            });
-                          }}
-                          className="p-1.5 text-red-500 hover:text-red-700 cursor-pointer"
+                          onClick={() => setEditingSection({ ...editingSection, imageAspectRatio: opt.val })}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border transition-colors ${
+                            activeRatio === opt.val
+                              ? 'bg-[#872D35] text-white border-[#872D35]'
+                              : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-100'
+                          }`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          {opt.label}
                         </button>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {(editingSection.images || []).map((imgUrl, i) => {
+                        const captionVal = (editingSection.imageCaptions || [])[i] || '';
+                        const thumbFrameClass =
+                          activeRatio === 'a4'
+                            ? 'w-14 aspect-[210/297] rounded-lg overflow-hidden border border-stone-200 bg-white flex items-center justify-center p-0.5 shrink-0'
+                            : activeRatio === 'square'
+                              ? 'w-12 h-12 rounded-lg overflow-hidden border border-stone-200 bg-stone-100 shrink-0'
+                              : 'w-14 aspect-4/3 rounded-lg overflow-hidden border border-stone-200 bg-stone-100 shrink-0';
+                        const thumbImgClass =
+                          activeRatio === 'a4' ? 'w-full h-full object-contain' : 'w-full h-full object-cover';
+
+                        return (
+                          <div key={i} className="p-2.5 rounded-xl border border-stone-200 bg-stone-50/70 space-y-2">
+                            <div className="flex items-center gap-2">
+                              {imgUrl?.trim() ? (
+                                <div className={thumbFrameClass}>
+                                  <img src={imgUrl} alt={captionVal || ''} className={thumbImgClass} />
+                                </div>
+                              ) : (
+                                <div className={`${thumbFrameClass} flex items-center justify-center text-[10px] text-stone-400`}>
+                                  #{i + 1}
+                                </div>
+                              )}
+                              <div className="flex-1 space-y-1.5 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={imgUrl}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setEditingSection((prev) => {
+                                        if (!prev) return prev;
+                                        const cur = [...(prev.images || [])];
+                                        cur[i] = val;
+                                        return { ...prev, images: cur };
+                                      });
+                                    }}
+                                    placeholder={`이미지 #${i + 1} URL`}
+                                    className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-stone-300 text-xs font-mono bg-white"
+                                  />
+                                  <label className="px-2.5 py-1.5 rounded-lg bg-stone-800 text-white text-xs font-bold cursor-pointer shrink-0">
+                                    <span>{isUploading ? '업로드 중...' : '업로드'}</span>
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      disabled={isUploading}
+                                      onChange={(e) => handleUploadImage({ type: 'multi', index: i }, e)}
+                                      className="hidden"
+                                    />
+                                  </label>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={captionVal}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditingSection((prev) => {
+                                      if (!prev) return prev;
+                                      const len = Math.max((prev.images || []).length, i + 1);
+                                      const caps = Array.from({ length: len }, (_, idx) => (prev.imageCaptions || [])[idx] || '');
+                                      caps[i] = val;
+                                      return { ...prev, imageCaptions: caps };
+                                    });
+                                  }}
+                                  placeholder={`이미지 #${i + 1} 하단 1줄 설명 문구 (예: 영업등록증, HACCP 인증서 등)`}
+                                  className="w-full px-2.5 py-1.5 rounded-lg border border-stone-300 text-xs bg-white"
+                                />
+                              </div>
+
+                              <div className="flex flex-col items-center gap-0.5 shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={i === 0}
+                                  onClick={() => moveMultiImage(i, 'up')}
+                                  className="p-1 text-stone-500 hover:text-stone-900 disabled:opacity-25 cursor-pointer"
+                                  title="위로 이동"
+                                >
+                                  <ChevronUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={i === (editingSection.images || []).length - 1}
+                                  onClick={() => moveMultiImage(i, 'down')}
+                                  className="p-1 text-stone-500 hover:text-stone-900 disabled:opacity-25 cursor-pointer"
+                                  title="아래로 이동"
+                                >
+                                  <ChevronDown className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingSection((prev) => {
+                                      if (!prev) return prev;
+                                      const cur = (prev.images || []).filter((_, idx) => idx !== i);
+                                      const caps = prev.imageCaptions
+                                        ? prev.imageCaptions.filter((_, idx) => idx !== i)
+                                        : undefined;
+                                      return { ...prev, images: cur, ...(caps !== undefined ? { imageCaptions: caps } : {}) };
+                                    });
+                                  }}
+                                  className="p-1 text-red-500 hover:text-red-700 cursor-pointer"
+                                  title="이미지 삭제"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* 7. Info List Table Editor */}
               {editingSection.type === 'info_list' && (
