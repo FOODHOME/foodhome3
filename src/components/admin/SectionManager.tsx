@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CustomSectionItem, SectionType } from '../../types';
 import { uploadImageToStorage } from '../../lib/supabase';
+import { resolveSectionTextAlign } from '../../data/defaultPageSections';
 import { 
   Plus, 
   Trash2, 
@@ -16,6 +17,8 @@ import {
   Image as ImageIcon, 
   Type, 
   AlignLeft, 
+  AlignCenter,
+  AlignRight,
   CreditCard, 
   ListOrdered, 
   MousePointerClick, 
@@ -287,6 +290,11 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                               ({sec.imagePosition === 'left' ? '이미지 좌측' : sec.imagePosition === 'right' ? '이미지 우측' : '이미지 상단'})
                             </span>
                           )}
+                          {(sec.type === 'text' || sec.type === 'heading' || sec.type === 'image_text' || sec.type === 'button_cta') && (
+                            <span className="text-[10px] text-stone-400 font-mono">
+                              ({resolveSectionTextAlign(sec) === 'center' ? '가운데 정렬' : resolveSectionTextAlign(sec) === 'right' ? '오른쪽 정렬' : '왼쪽 정렬'})
+                            </span>
+                          )}
                         </div>
                         {sec.content && (
                           <p className="text-[11px] text-stone-500 truncate mt-0.5 max-w-lg">
@@ -478,6 +486,44 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                     </div>
                   )}
                 </>
+              )}
+
+              {/* 2-2. Text Alignment Selector */}
+              {(editingSection.type === 'text' ||
+                editingSection.type === 'heading' ||
+                editingSection.type === 'image_text' ||
+                editingSection.type === 'button_cta' ||
+                editingSection.type === 'image') && (
+                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 space-y-2">
+                  <label className="block text-xs font-bold text-stone-700">
+                    텍스트 정렬 방식 (블록별 독립 적용)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'left' as const, label: '왼쪽 정렬', icon: AlignLeft },
+                      { id: 'center' as const, label: '가운데 정렬', icon: AlignCenter },
+                      { id: 'right' as const, label: '오른쪽 정렬', icon: AlignRight },
+                    ].map((alignOpt) => {
+                      const AlignIcon = alignOpt.icon;
+                      const isActive = resolveSectionTextAlign(editingSection) === alignOpt.id;
+                      return (
+                        <button
+                          key={alignOpt.id}
+                          type="button"
+                          onClick={() => setEditingSection({ ...editingSection, textAlign: alignOpt.id })}
+                          className={`py-2 px-2.5 rounded-lg border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            isActive
+                              ? 'border-[#872D35] bg-[#872D35] text-white shadow-2xs'
+                              : 'border-stone-300 bg-white text-stone-700 hover:bg-stone-100'
+                          }`}
+                        >
+                          <AlignIcon className="w-3.5 h-3.5" />
+                          <span>{alignOpt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
 
               {/* 3. Image Alignment Toggle for image_text */}
