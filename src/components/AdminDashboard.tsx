@@ -66,7 +66,8 @@ import {
   Layers,
   Settings,
   ChevronLeft,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  AlertCircle
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -112,6 +113,11 @@ export const AdminDashboard: React.FC = () => {
   const [supabaseKeyInput, setSupabaseKeyInput] = useState(supabaseConfig.anonKey || '');
   const [isTestingSupabase, setIsTestingSupabase] = useState(false);
   const [supabaseStatusResult, setSupabaseStatusResult] = useState<string | null>(null);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+    timestamp?: string;
+  } | null>(null);
 
   const [formspreeEndpointInput, setFormspreeEndpointInput] = useState(
     state.formspreeEndpoint || 'https://formspree.io/f/xoejykbn'
@@ -1264,16 +1270,21 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Phase 1: Public Site Contents Sync Card */}
-              <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-2xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              {/* Public Site Contents Sync Card */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-5 shadow-2xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
                   <div>
-                    <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                      <Send className="w-4 h-4 text-[#872D35]" />
-                      <span>1차 홈페이지 공개 콘텐츠 동기화 (site_contents / main_contents)</span>
-                    </h4>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      회사소개, 배너, 제품, 공지·FAQ, 후기, 테마, SEO만 Supabase에 저장하며 고객 문의/견적 개인정보(inquiries, quotes)는 제외됩니다.
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                        <Send className="w-4 h-4 text-[#872D35]" />
+                        <span>홈페이지 콘텐츠 동기화</span>
+                      </h4>
+                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px] font-bold">
+                        site_contents / main_contents
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      브라우저 <code className="font-mono text-slate-700">foodhome_app_data_v4</code>의 공개 콘텐츠만 Supabase에 게시하거나, 필요 시 원격 콘텐츠를 불러옵니다.
                     </p>
                   </div>
                   <span
@@ -1289,74 +1300,200 @@ export const AdminDashboard: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] text-slate-500 block">원격 DB 상태</span>
-                    <strong className="text-slate-800">
-                      {remoteSiteContentsInfo?.exists
-                        ? '게시된 콘텐츠 있음'
-                        : supabaseConfig.url && supabaseConfig.anonKey
-                        ? '미게시 (로컬 데이터 보존 중)'
-                        : 'Supabase 미연결'}
-                    </strong>
+                {/* Status Grid: Connection, Last Publish, Remote Status, Local Changes */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                    <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                      <Database className="w-3 h-3 text-slate-400" />
+                      <span>현재 DB 연결 상태</span>
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          supabaseConfig.url && supabaseConfig.anonKey
+                            ? isSupabaseAdminAuthed
+                              ? 'bg-emerald-500'
+                              : 'bg-amber-500'
+                            : 'bg-slate-400'
+                        }`}
+                      />
+                      <strong className="text-slate-800">
+                        {!(supabaseConfig.url && supabaseConfig.anonKey)
+                          ? '미연결 (키 미설정)'
+                          : isSupabaseAdminAuthed
+                          ? '연결 및 관리자 인증 완료'
+                          : 'DB 연결됨 (이메일 인증 필요)'}
+                      </strong>
+                    </div>
+                    {supabaseConfig.url && (
+                      <p className="text-[10px] font-mono text-slate-400 truncate" title={supabaseConfig.url}>
+                        {supabaseConfig.url}
+                      </p>
+                    )}
                   </div>
-                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] text-slate-500 block">최근 게시 시각</span>
-                    <strong className="text-slate-800">
+
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                    <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>마지막 게시 시각</span>
+                    </span>
+                    <strong className="text-slate-800 block">
                       {lastSupabasePublishAt
                         ? new Date(lastSupabasePublishAt).toLocaleString('ko-KR')
                         : remoteSiteContentsInfo?.updatedAt
                         ? new Date(remoteSiteContentsInfo.updatedAt).toLocaleString('ko-KR')
                         : '기록 없음'}
                     </strong>
+                    <span className="text-[10px] text-slate-400 block">
+                      {lastSupabasePublishAt || remoteSiteContentsInfo?.updatedAt
+                        ? '최신 동기화 기준'
+                        : '아직 게시 이력 없음'}
+                    </span>
                   </div>
-                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                    <span className="text-[11px] text-slate-500 block">로컬 변경 상태</span>
-                    <strong className={hasUnpublishedChanges ? 'text-[#872D35]' : 'text-emerald-700'}>
-                      {hasUnpublishedChanges ? '게시 대기 변경사항 있음' : '최신 상태'}
+
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                    <span className="text-[11px] text-slate-500 block">원격 DB 콘텐츠 상태</span>
+                    <strong className="text-slate-800 block">
+                      {remoteSiteContentsInfo?.exists
+                        ? '게시된 콘텐츠 있음'
+                        : supabaseConfig.url && supabaseConfig.anonKey
+                        ? '미게시 (로컬 데이터 보존 중)'
+                        : 'Supabase 미연결'}
                     </strong>
+                    <span className="text-[10px] text-slate-400 block">
+                      원격 미게시 시에도 로컬 유지
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-1">
+                    <span className="text-[11px] text-slate-500 block">로컬 변경 상태 (v4)</span>
+                    <strong className={`block ${hasUnpublishedChanges ? 'text-[#872D35]' : 'text-emerald-700'}`}>
+                      {hasUnpublishedChanges ? '게시 대기 변경사항 있음' : '동기화됨'}
+                    </strong>
+                    <span className="text-[10px] text-slate-400 block">
+                      localStorage 실시간 보존 중
+                    </span>
                   </div>
                 </div>
 
-                {lastSupabaseSyncError && (
-                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs font-bold text-red-700">
-                    동기화 알림: {lastSupabaseSyncError}
+                {/* Scope & Privacy Summary */}
+                <div className="p-3.5 rounded-lg bg-slate-50/80 border border-slate-200 text-[11px] text-slate-600 space-y-1.5">
+                  <div className="font-bold text-slate-800">
+                    저장 대상 공개 콘텐츠 (9개 영역):
+                  </div>
+                  <p className="leading-relaxed">
+                    회사소개 · 제품 및 제품 상세정보 · 배너 · 공지사항 · FAQ · 후기 · 테마 및 디자인 설정 · 메뉴 및 홈페이지 콘텐츠 · SEO 및 기타 공개 설정
+                  </p>
+                  <p className="text-slate-500">
+                    * 고객 문의(<code className="font-mono">inquiries</code>), 견적 요청(<code className="font-mono">quotes</code>) 및 관리자 인증 정보는 공개 테이블에 저장되지 않습니다.
+                  </p>
+                </div>
+
+                {/* Inline Sync Feedback (Success / Failure) */}
+                {syncFeedback && (
+                  <div
+                    className={`p-3.5 rounded-lg border text-xs flex items-start gap-2.5 ${
+                      syncFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}
+                  >
+                    {syncFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-0.5">
+                      <p className="font-bold">{syncFeedback.message}</p>
+                      {syncFeedback.timestamp && (
+                        <p className="text-[11px] opacity-80">
+                          처리 시각: {new Date(syncFeedback.timestamp).toLocaleString('ko-KR')}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
 
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                  <button
-                    type="button"
-                    disabled={isSyncingFromSupabase || !supabaseConfig.url || !supabaseConfig.anonKey}
-                    onClick={async () => {
-                      if (
-                        window.confirm(
-                          'Supabase에 저장된 공개 콘텐츠를 현재 관리자 화면으로 불러오시겠습니까?\n(아직 게시하지 않은 로컬 수정사항이 있다면 덮어씌워질 수 있으며, 문의/견적 내역은 유지됩니다.)'
-                        )
-                      ) {
-                        await pullPublicContentsFromSupabase();
-                      }
-                    }}
-                    className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    {isSyncingFromSupabase ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    )}
-                    <span>Supabase에서 불러오기</span>
-                  </button>
+                {!syncFeedback && lastSupabaseSyncError && (
+                  <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-xs font-bold text-red-700 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                    <span>동기화 오류: {lastSupabaseSyncError}</span>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleExportJson}
+                      className="px-3.5 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 text-slate-500" />
+                      <span>게시 전 JSON 백업</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSyncingFromSupabase || isPublishingToSupabase || !supabaseConfig.url || !supabaseConfig.anonKey}
+                      onClick={async () => {
+                        if (
+                          window.confirm(
+                            'Supabase에 저장된 공개 콘텐츠를 현재 관리자 화면으로 불러오시겠습니까?\n(현재 브라우저의 미게시 수정사항이 덮어씌워질 수 있으며, 문의/견적 내역 및 로컬 백업 파일은 안전하게 유지됩니다.)'
+                          )
+                        ) {
+                          setSyncFeedback(null);
+                          const res = await pullPublicContentsFromSupabase();
+                          if (res.success) {
+                            setSyncFeedback({
+                              type: 'success',
+                              message: 'Supabase에서 홈페이지 공개 콘텐츠를 성공적으로 불러왔습니다.',
+                              timestamp: new Date().toISOString()
+                            });
+                          } else {
+                            setSyncFeedback({
+                              type: 'error',
+                              message: res.error || 'Supabase에서 홈페이지 콘텐츠를 불러오지 못했습니다. 기존 로컬 데이터는 유지됩니다.'
+                            });
+                          }
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSyncingFromSupabase ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      )}
+                      <span>Supabase에서 홈페이지 콘텐츠 불러오기</span>
+                    </button>
+                  </div>
 
                   <button
                     type="button"
-                    disabled={isPublishingToSupabase || !supabaseConfig.url || !supabaseConfig.anonKey}
-                    onClick={() => publishPublicContentsToSupabase()}
-                    className="px-5 py-2 rounded-lg bg-[#872D35] hover:bg-[#6E1D24] text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                    disabled={isPublishingToSupabase || isSyncingFromSupabase || !supabaseConfig.url || !supabaseConfig.anonKey}
+                    onClick={async () => {
+                      setSyncFeedback(null);
+                      const res = await publishPublicContentsToSupabase();
+                      if (res.success) {
+                        setSyncFeedback({
+                          type: 'success',
+                          message: '현재 홈페이지 공개 콘텐츠(foodhome_app_data_v4 기준)가 Supabase에 성공적으로 게시되었습니다.',
+                          timestamp: res.updatedAt || new Date().toISOString()
+                        });
+                      } else {
+                        setSyncFeedback({
+                          type: 'error',
+                          message: res.error || 'Supabase 게시에 실패했습니다. 기존 로컬 데이터는 그대로 보존됩니다.'
+                        });
+                      }
+                    }}
+                    className="px-5 py-2.5 rounded-lg bg-[#872D35] hover:bg-[#6E1D24] text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs"
                   >
                     {isPublishingToSupabase ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      <Send className="w-3.5 h-3.5" />
+                      <Send className="w-4 h-4" />
                     )}
                     <span>현재 홈페이지 콘텐츠 Supabase에 게시</span>
                   </button>

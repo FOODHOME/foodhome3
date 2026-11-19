@@ -474,7 +474,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSyncingFromSupabase, setIsSyncingFromSupabase] = useState(false);
   const [isPublishingToSupabase, setIsPublishingToSupabase] = useState(false);
   const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
-  const [lastSupabasePublishAt, setLastSupabasePublishAt] = useState<string | null>(null);
+  const [lastSupabasePublishAt, setLastSupabasePublishAt] = useState<string | null>(() => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem('foodhome_last_supabase_publish_at');
+      }
+    } catch {}
+    return null;
+  });
   const [lastSupabaseSyncError, setLastSupabaseSyncError] = useState<string | null>(null);
   const [remoteSiteContentsInfo, setRemoteSiteContentsInfo] = useState<{ exists: boolean; updatedAt: string | null } | null>(null);
 
@@ -1257,13 +1264,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const publishPublicContentsToSupabase = async (): Promise<{ success: boolean; updatedAt?: string; error?: string }> => {
     setIsPublishingToSupabase(true);
-    const res = await publishPublicSiteContents(state);
+
+    // Base publication on localStorage('foodhome_app_data_v4') when available, falling back to current state
+    let sourceState: AppState = state;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const savedRaw = window.localStorage.getItem(STORAGE_KEY);
+        if (savedRaw) {
+          const parsed = JSON.parse(savedRaw);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            sourceState = normalizeStateWithDefaults(state, parsed, {
+              inquiries: state.inquiries,
+              quotes: state.quotes
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Reading foodhome_app_data_v4 for publish fell back to in-memory state:', e);
+    }
+
+    const res = await publishPublicSiteContents(sourceState);
     setIsPublishingToSupabase(false);
 
     if (res.success) {
       setHasUnpublishedChanges(false);
       const publishedAt = res.updatedAt || new Date().toISOString();
       setLastSupabasePublishAt(publishedAt);
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem('foodhome_last_supabase_publish_at', publishedAt);
+        }
+      } catch {}
       setLastSupabaseSyncError(null);
       setRemoteSiteContentsInfo({ exists: true, updatedAt: publishedAt });
       showToast('홈페이지 공개 콘텐츠가 Supabase DB에 성공적으로 게시되었습니다.');
@@ -1291,7 +1323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setLastSupabaseSyncError(null);
 
     if (!res.exists || !res.payload) {
-      const msg = 'Supabase site_contents에 아직 게시된 공개 콘텐츠가 없습니다.';
+      const msg = 'Supabase site_contents에 아직 게시된 공개 콘텐츠가 없습니다. 기존 로컬 데이터는 그대로 유지됩니다.';
       showToast(msg);
       return { success: false, error: msg };
     }
@@ -1305,6 +1337,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setHasUnpublishedChanges(false);
     if (res.updatedAt) {
       setLastSupabasePublishAt(res.updatedAt);
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem('foodhome_last_supabase_publish_at', res.updatedAt);
+        }
+      } catch {}
     }
     showToast('Supabase에서 최신 홈페이지 공개 콘텐츠를 불러왔습니다.');
     return { success: true };
