@@ -163,8 +163,9 @@ interface AppContextType {
   lastSupabasePublishAt: string | null;
   lastSupabaseSyncError: string | null;
   remoteSiteContentsInfo: { exists: boolean; updatedAt: string | null } | null;
-  publishPublicContentsToSupabase: () => Promise<{ success: boolean; updatedAt?: string; error?: string }>;
+  publishPublicContentsToSupabase: (overridePartial?: Partial<AppState>) => Promise<{ success: boolean; updatedAt?: string; error?: string }>;
   pullPublicContentsFromSupabase: () => Promise<{ success: boolean; error?: string }>;
+  syncPublicConfigForVisitor: () => Promise<void>;
   handleAdminLogin: (credentials: { email?: string; password: string }) => Promise<{ success: boolean; error?: string }>;
   handleAdminLogout: () => Promise<void>;
   supabaseConfig: { url: string; anonKey: string };
@@ -342,33 +343,197 @@ function maskKoreanName(nameInput: string): string {
   return name;
 }
 
+export function stripSample1kgFromText(text?: string): string {
+  if (!text || typeof text !== 'string') return text || '';
+  return text
+    .replace(/사업자\s*무료\s*샘플\s*1kg/gi, (m) => m.replace(/\s*1kg/gi, ''))
+    .replace(/사업자\s*1kg\s*(무료\s*샘플(?:팩)?)/gi, '사업자 $1')
+    .replace(/사업자\s*무료\s*1kg\s*(샘플(?:팩)?)/gi, '사업자 무료 $1')
+    .replace(/(무료\s*샘플(?:팩)?)\s*1kg/gi, '$1')
+    .replace(/1kg\s*(무료\s*샘플(?:팩)?|무료\s*테스팅팩|정품\s*맛보기\s*샘플|본품\s*샘플팩)/gi, '$1')
+    .replace(/무료\s*1kg\s*(샘플(?:팩)?)/gi, '무료 $1')
+    .replace(/FREE\s+1KG\s+SAMPLE/gi, 'FREE SAMPLE')
+    .replace(/[ ]{2,}/g, ' ')
+    .trim();
+}
+
 function normalizeStateWithDefaults(
   baseState: AppState,
   parsed: Partial<AppState> | Partial<PublicSitePayload>,
   preservePrivate?: { inquiries: B2BInquiry[]; quotes: QuoteInquiry[] }
 ): AppState {
   const parsedAsApp = parsed as Partial<AppState>;
+  const parsedContent = parsed.content;
+  const rawContent = {
+    ...baseState.content,
+    ...(parsedContent || {})
+  };
+  const parsedNavMenus = parsedContent?.navMenus;
+  const cleanedNavMenus = (
+    Array.isArray(parsedNavMenus) && parsedNavMenus.length > 0
+      ? parsedNavMenus
+      : baseState.content.navMenus
+  ).map((menu: any) => ({
+    ...menu,
+    name: stripSample1kgFromText(menu.name),
+    submenus: Array.isArray(menu.submenus)
+      ? menu.submenus.map((sub: any) => ({
+          ...sub,
+          label: stripSample1kgFromText(sub.label)
+        }))
+      : menu.submenus
+  }));
+
+  const parsedBanners = parsedContent?.banners;
+  const cleanedBanners = (
+    Array.isArray(parsedBanners) && parsedBanners.length > 0
+      ? parsedBanners
+      : baseState.content.banners
+  ).map((b: any) => ({
+    ...b,
+    title: stripSample1kgFromText(b.title),
+    subtitle: stripSample1kgFromText(b.subtitle),
+    description: stripSample1kgFromText(b.description),
+    primaryButtonText: stripSample1kgFromText(b.primaryButtonText),
+    secondaryButtonText: stripSample1kgFromText(b.secondaryButtonText)
+  }));
+
+  const parsedMainSections = parsedContent?.mainSections;
+  const cleanedMainSections = (
+    Array.isArray(parsedMainSections) && parsedMainSections.length > 0
+      ? parsedMainSections.map((sec: any) =>
+          sec.id === 'reviews' && sec.title === '전국 480여 개 외식 파트너의 생생한 찬사'
+            ? { ...sec, title: '전국 프랜차이즈 및 외식업체 대표님들의 후기' }
+            : sec
+        )
+      : (baseState.content.mainSections || [])
+  ).map((sec: any) => ({
+    ...sec,
+    name: stripSample1kgFromText(sec.name),
+    badge: stripSample1kgFromText(sec.badge),
+    title: stripSample1kgFromText(sec.title),
+    description: stripSample1kgFromText(sec.description),
+    buttonText: stripSample1kgFromText(sec.buttonText)
+  }));
+
+  const resolvedPageSections = (() => {
+    const savedSections = parsed.content?.pageSections;
+    if (!savedSections) return baseState.content.pageSections;
+    const introList = savedSections['about-intro'] || savedSections['intro'];
+    if (Array.isArray(introList) && introList.length > 0) {
+      const hasModernIntro = introList.some(
+        (s: any) =>
+          s.id === 'sec-intro-text-1' ||
+          s.id === 'sec-intro-image' ||
+          s.id === 'sec-intro-signature' ||
+          s.type === 'signature'
+      );
+      const isLegacyUntouchedIntro =
+        !hasModernIntro &&
+        introList.some((s: any) => s.id === 'sec-intro-ceo' && s.visible !== false);
+      if (isLegacyUntouchedIntro) {
+        const defs = getDefaultPageSections('about-intro', parsed.content || {});
+        const merged = [
+          ...defs.slice(0, 4),
+          ...introList.map((s: any) => {
+            if (['sec-intro-corporate', 'sec-intro-values', 'sec-intro-cta', 'sec-intro-ceo'].includes(s.id)) {
+              return { ...s, visible: false };
+            }
+            return s;
+          })
+        ];
+        return {
+          ...savedSections,
+          'about-intro': merged
+        };
+      }
+    }
+    return savedSections;
+  })();
+
+  const cleanedPageSections = resolvedPageSections
+    ? Object.fromEntries(
+        Object.entries(resolvedPageSections).map(([key, list]) => [
+          key,
+          Array.isArray(list)
+            ? list.map((sec: any) => ({
+                ...sec,
+                title: stripSample1kgFromText(sec.title),
+                subtitle: stripSample1kgFromText(sec.subtitle),
+                content: stripSample1kgFromText(sec.content),
+                buttonText: stripSample1kgFromText(sec.buttonText),
+                secondaryButtonText: stripSample1kgFromText(sec.secondaryButtonText),
+                cardItems: Array.isArray(sec.cardItems)
+                  ? sec.cardItems.map((c: any) => ({
+                      ...c,
+                      title: stripSample1kgFromText(c.title),
+                      desc: stripSample1kgFromText(c.desc)
+                    }))
+                  : sec.cardItems
+              }))
+            : list
+        ])
+      )
+    : resolvedPageSections;
+
+  const cleanedProducts = (
+    Array.isArray(parsed.products) && parsed.products.length > 0
+      ? parsed.products
+      : baseState.products
+  ).map((p: any) => ({
+    ...p,
+    buttonText: p.buttonText ? stripSample1kgFromText(p.buttonText) : p.buttonText,
+    ctaButtons: Array.isArray(p.ctaButtons)
+      ? p.ctaButtons.map((btn: any) => ({
+          ...btn,
+          text: stripSample1kgFromText(btn.text)
+        }))
+      : p.ctaButtons
+  }));
+
+  const resolvedFormConfig = parsed.formConfig
+    ? { ...baseState.formConfig, ...parsed.formConfig }
+    : baseState.formConfig;
+
+  const cleanedFormConfig = {
+    ...resolvedFormConfig,
+    sampleFormFields: Array.isArray(resolvedFormConfig.sampleFormFields)
+      ? resolvedFormConfig.sampleFormFields.map((f: any) => ({
+          ...f,
+          placeholder: f.placeholder ? stripSample1kgFromText(f.placeholder) : f.placeholder
+        }))
+      : resolvedFormConfig.sampleFormFields
+  };
+
   return {
     ...baseState,
     ...parsed,
     content: {
-      ...baseState.content,
-      ...(parsed.content || {}),
-      navMenus:
-        Array.isArray(parsed.content?.navMenus) && parsed.content.navMenus.length > 0
-          ? parsed.content.navMenus
-          : baseState.content.navMenus,
-      banners:
-        Array.isArray(parsed.content?.banners) && parsed.content.banners.length > 0
-          ? parsed.content.banners
-          : baseState.content.banners,
+      ...rawContent,
+      floatingSampleText: stripSample1kgFromText(rawContent.floatingSampleText),
+      footerQuickSampleText: stripSample1kgFromText(rawContent.footerQuickSampleText),
+      sampleGuideText: stripSample1kgFromText(rawContent.sampleGuideText),
+      deliverySteps: Array.isArray(rawContent.deliverySteps)
+        ? rawContent.deliverySteps.map((step: any) => ({
+            ...step,
+            title: stripSample1kgFromText(step.title),
+            desc: stripSample1kgFromText(step.desc)
+          }))
+        : rawContent.deliverySteps,
+      navMenus: cleanedNavMenus,
+      banners: cleanedBanners,
       facilityItems:
         Array.isArray(parsed.content?.facilityItems) && parsed.content.facilityItems.length > 0
           ? parsed.content.facilityItems
           : baseState.content.facilityItems,
-      faqItems: Array.isArray(parsed.content?.faqItems)
+      faqItems: (Array.isArray(parsed.content?.faqItems)
         ? parsed.content.faqItems
-        : baseState.content.faqItems,
+        : baseState.content.faqItems
+      ).map((faq: any) => ({
+        ...faq,
+        question: stripSample1kgFromText(faq.question),
+        answer: stripSample1kgFromText(faq.answer)
+      })),
       faqCategories:
         Array.isArray(parsed.content?.faqCategories) && parsed.content.faqCategories.length > 0
           ? parsed.content.faqCategories
@@ -382,48 +547,8 @@ function normalizeStateWithDefaults(
         Array.isArray(parsed.content?.companySubpages) && parsed.content.companySubpages.length > 0
           ? parsed.content.companySubpages
           : baseState.content.companySubpages,
-      mainSections:
-        Array.isArray(parsed.content?.mainSections) && parsed.content.mainSections.length > 0
-          ? parsed.content.mainSections.map((sec: any) =>
-              sec.id === 'reviews' && sec.title === '전국 480여 개 외식 파트너의 생생한 찬사'
-                ? { ...sec, title: '전국 프랜차이즈 및 외식업체 대표님들의 후기' }
-                : sec
-            )
-          : baseState.content.mainSections,
-      pageSections: (() => {
-        const savedSections = parsed.content?.pageSections;
-        if (!savedSections) return baseState.content.pageSections;
-        const introList = savedSections['about-intro'] || savedSections['intro'];
-        if (Array.isArray(introList) && introList.length > 0) {
-          const hasModernIntro = introList.some(
-            (s: any) =>
-              s.id === 'sec-intro-text-1' ||
-              s.id === 'sec-intro-image' ||
-              s.id === 'sec-intro-signature' ||
-              s.type === 'signature'
-          );
-          const isLegacyUntouchedIntro =
-            !hasModernIntro &&
-            introList.some((s: any) => s.id === 'sec-intro-ceo' && s.visible !== false);
-          if (isLegacyUntouchedIntro) {
-            const defs = getDefaultPageSections('about-intro', parsed.content || {});
-            const merged = [
-              ...defs.slice(0, 4),
-              ...introList.map((s: any) => {
-                if (['sec-intro-corporate', 'sec-intro-values', 'sec-intro-cta', 'sec-intro-ceo'].includes(s.id)) {
-                  return { ...s, visible: false };
-                }
-                return s;
-              })
-            ];
-            return {
-              ...savedSections,
-              'about-intro': merged
-            };
-          }
-        }
-        return savedSections;
-      })()
+      mainSections: cleanedMainSections,
+      pageSections: cleanedPageSections
     },
     theme: {
       ...baseState.theme,
@@ -441,10 +566,7 @@ function normalizeStateWithDefaults(
         ...((parsed.theme && parsed.theme.sectionsVisible) || {})
       }
     },
-    products:
-      Array.isArray(parsed.products) && parsed.products.length > 0
-        ? parsed.products
-        : baseState.products,
+    products: cleanedProducts,
     posts: Array.isArray(parsed.posts) ? parsed.posts : baseState.posts,
     reviews: Array.isArray(parsed.reviews) ? parsed.reviews : baseState.reviews,
     inquiries: preservePrivate
@@ -457,10 +579,13 @@ function normalizeStateWithDefaults(
       : Array.isArray(parsedAsApp.quotes)
       ? parsedAsApp.quotes
       : baseState.quotes,
-    formConfig: parsed.formConfig
-      ? { ...baseState.formConfig, ...parsed.formConfig }
-      : baseState.formConfig,
-    seo: { ...baseState.seo, ...(parsed.seo || {}) },
+    formConfig: cleanedFormConfig,
+    seo: {
+      ...baseState.seo,
+      ...(parsed.seo || {}),
+      metaDescription: stripSample1kgFromText((parsed.seo || baseState.seo).metaDescription),
+      ogDescription: stripSample1kgFromText((parsed.seo || baseState.seo).ogDescription)
+    },
     social: { ...baseState.social, ...(parsed.social || {}) },
     formspreeEndpoint:
       parsed.formspreeEndpoint || baseState.formspreeEndpoint || 'https://formspree.io/f/xoejykbn'
@@ -1727,7 +1852,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const publishPublicContentsToSupabase = async (): Promise<{ success: boolean; updatedAt?: string; error?: string }> => {
+  const publishPublicContentsToSupabase = async (
+    overridePartial?: Partial<AppState>
+  ): Promise<{ success: boolean; updatedAt?: string; error?: string }> => {
     setIsPublishingToSupabase(true);
 
     // Base publication on localStorage('foodhome_app_data_v4') when available, falling back to current state
@@ -1747,6 +1874,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch (e) {
       console.warn('Reading foodhome_app_data_v4 for publish fell back to in-memory state:', e);
+    }
+
+    if (overridePartial && typeof overridePartial === 'object') {
+      sourceState = normalizeStateWithDefaults(sourceState, overridePartial, {
+        inquiries: sourceState.inquiries,
+        quotes: sourceState.quotes
+      });
     }
 
     const res = await publishPublicSiteContents(sourceState);
@@ -1771,6 +1905,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return res;
   };
+
+  const syncPublicConfigForVisitor = useCallback(async () => {
+    const adminActive =
+      isAdminLoggedInRef.current ||
+      isSupabaseAdminAuthedRef.current ||
+      (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('foodhome_admin_session') === 'true');
+    if (adminActive) return;
+
+    const cfg = getSavedSupabaseConfig();
+    if (!cfg.url || !cfg.anonKey) return;
+
+    const res = await fetchPublicSiteContents();
+    if (res.ok && res.exists && res.payload) {
+      setState(prev =>
+        normalizeStateWithDefaults(prev, res.payload!, {
+          inquiries: prev.inquiries,
+          quotes: prev.quotes
+        })
+      );
+    }
+  }, []);
 
   const pullPublicContentsFromSupabase = async (): Promise<{ success: boolean; error?: string }> => {
     setIsSyncingFromSupabase(true);
@@ -2698,6 +2853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         remoteSiteContentsInfo,
         publishPublicContentsToSupabase,
         pullPublicContentsFromSupabase,
+        syncPublicConfigForVisitor,
         handleAdminLogin,
         handleAdminLogout,
         supabaseConfig,

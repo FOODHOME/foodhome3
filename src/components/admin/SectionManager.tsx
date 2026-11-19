@@ -1062,7 +1062,7 @@ export const SectionManager: React.FC<SectionManagerProps> = ({
                       type="text"
                       value={editingSection.buttonText || ''}
                       onChange={(e) => setEditingSection({ ...editingSection, buttonText: e.target.value })}
-                      placeholder="예: 무료 샘플 1kg 신청하기"
+                      placeholder="예: 무료 샘플 신청하기"
                       className="w-full px-3 py-1.5 rounded-lg border border-stone-300 text-xs font-bold bg-white text-[#872D35]"
                     />
                   </div>

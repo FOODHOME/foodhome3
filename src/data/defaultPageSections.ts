@@ -137,7 +137,7 @@ export const getDefaultPageSections = (pageId: string, content: Partial<SiteCont
         {
           id: 'sec-intro-cta',
           type: 'button_cta',
-          title: '직접 맛을 보시고 결정하세요. 1kg 무료 샘플팩 신청 접수 중',
+          title: '직접 맛을 보시고 결정하세요. 무료 샘플팩 신청 접수 중',
           content: '사업자등록증을 보유하신 모든 외식업 대표님께 푸드홈 시그니처 보쌈무김치를 무료로 발송해 드립니다.',
           buttonText: '무료 샘플 신청글 쓰기',
           buttonAction: 'sample',
@@ -211,7 +211,7 @@ export const getDefaultPageSections = (pageId: string, content: Partial<SiteCont
           type: 'button_cta',
           title: '전국 480개 외식 매장 매일 아침 직배송 네트워크',
           content: '생산 즉시 충북 진천 물류허브에서 출발하여 전국 주요 광역 거점을 통해 익일 오전까지 냉장 신선 상태를 그대로 유지하며 배송됩니다.',
-          buttonText: '무료 샘플 1kg 받아보기',
+          buttonText: '무료 샘플 받아보기',
           buttonAction: 'sample',
           secondaryButtonText: '대량 납품 상담 문의',
           secondaryButtonAction: 'quote',
@@ -308,7 +308,7 @@ export const getDefaultPageSections = (pageId: string, content: Partial<SiteCont
           content: '대형 프랜차이즈 본사 및 물류 총괄 관계자분의 시설 실사 및 샘플 테스팅 미팅을 언제나 환영합니다.',
           buttonText: '1:1 대량 납품 견적 문의하기',
           buttonAction: 'quote',
-          secondaryButtonText: '사업자 무료 샘플 1kg 신청',
+          secondaryButtonText: '사업자 무료 샘플 신청',
           secondaryButtonAction: 'sample',
           visible: true,
           order: 2
@@ -383,7 +383,7 @@ export const getDefaultProductSections = (product: ProductItem): CustomSectionIt
       cardItems: [
         {
           title: 'STEP 1. 무료 샘플 신청',
-          desc: '1kg 정품 맛보기 샘플을 무료로 받아 매장 요리와 궁합을 테스트합니다.',
+          desc: '정품 맛보기 샘플을 무료로 받아 매장 요리와 궁합을 테스트합니다.',
           icon: 'Sparkles',
           badge: '100% 무료'
         },
@@ -413,8 +413,8 @@ export const getDefaultProductSections = (product: ProductItem): CustomSectionIt
       id: `psec-${product.id}-cta`,
       type: 'button_cta',
       title: `${product.name}을(를) 매장에서 먼저 무료로 시식해 보세요`,
-      content: '사업자등록증을 보유하신 외식업 대표님께 1kg 본품 샘플팩을 전액 무료(배송비 푸드홈 부담)로 발송해 드립니다.',
-      buttonText: '무료 샘플 1kg 신청하기',
+      content: '사업자등록증을 보유하신 외식업 대표님께 본품 샘플팩을 전액 무료(배송비 푸드홈 부담)로 발송해 드립니다.',
+      buttonText: '무료 샘플 신청하기',
       buttonAction: 'sample',
       secondaryButtonText: '1:1 대량 납품 견적 상담',
       secondaryButtonAction: 'quote',

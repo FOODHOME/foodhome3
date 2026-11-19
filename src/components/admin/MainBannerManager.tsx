@@ -36,7 +36,7 @@ export const MainBannerManager: React.FC = () => {
             primaryButtonText: '제품 자세히 보기',
             primaryButtonLink: 'products',
             primaryButtonAction: 'products',
-            secondaryButtonText: '무료 샘플 1kg 신청',
+            secondaryButtonText: '무료 샘플 신청',
             secondaryButtonLink: 'sample-board',
             secondaryButtonAction: 'sample',
             order: 1,

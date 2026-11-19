@@ -173,7 +173,7 @@ export const getEffectiveProductCtaButtons = (product: ProductItem): ProductCtaB
   return [
     {
       id: 'cta-sample',
-      text: '사업자 1kg 무료 샘플 신청',
+      text: '사업자 무료 샘플 신청',
       action: 'sample',
       bg: '#872D35',
       color: '#ffffff',

@@ -7,14 +7,25 @@ import {
   Trash2, 
   Save, 
   Check, 
+  Edit3,
+  X,
   ShieldCheck, 
   FileText, 
   Layers, 
-  AlertCircle 
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 
 export const FormConfigManager: React.FC = () => {
-  const { state, updateFormConfig, showToast } = useApp();
+  const {
+    state,
+    updateFormConfig,
+    publishPublicContentsToSupabase,
+    isSupabaseAdminAuthed,
+    supabaseConfig,
+    isPublishingToSupabase,
+    showToast
+  } = useApp();
   const [activeTab, setActiveTab] = useState<'sample' | 'quote'>('sample');
 
   const [formConfig, setFormConfig] = useState<FormConfig>(() => {
@@ -28,10 +39,10 @@ export const FormConfigManager: React.FC = () => {
         { id: 'f-s-6', name: 'password', label: '게시글 열람 비밀번호', type: 'password', required: true, order: 6, enabled: true }
       ],
       sampleProductOptions: [
-        '명품 보쌈무김치 1kg (대표 인기품목)',
-        '비법 보쌈김칫속(보쌈속) 1kg',
-        '업소용 특제 굴보쌈 양념 500g',
-        '특허 수분제어 맞춤 절임무 1kg'
+        '명품 보쌈무김치 (대표 인기품목)',
+        '비법 보쌈김칫속(보쌈속)',
+        '업소용 특제 굴보쌈 양념',
+        '특허 수분제어 맞춤 절임무'
       ],
       sampleStatuses: ['접수대기', '접수완료', '답변완료', '배송준비', '배송완료'],
       samplePrivacyText: '개인정보보호법에 의거하여 무료 샘플 발송 및 B2B 상담 목적으로만 성함, 연락처, 주소를 수집하며, 발송 완료 3개월 후 안전하게 파기됩니다.',
@@ -60,7 +71,8 @@ export const FormConfigManager: React.FC = () => {
   }, [state.formConfig]);
 
   const [newProductInput, setNewProductInput] = useState('');
-  const [newStatusInput, setNewStatusInput] = useState('');
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState('');
 
   const handleToggleRequired = (isSample: boolean, id: string) => {
     if (isSample) {
@@ -91,40 +103,64 @@ export const FormConfigManager: React.FC = () => {
   };
 
   const handleAddProductOption = (isSample: boolean) => {
-    if (!newProductInput.trim()) return;
-    if (isSample) {
-      setFormConfig(prev => ({
-        ...prev,
-        sampleProductOptions: [...prev.sampleProductOptions, newProductInput.trim()]
-      }));
-    } else {
-      setFormConfig(prev => ({
-        ...prev,
-        quoteProductOptions: [...prev.quoteProductOptions, newProductInput.trim()]
-      }));
-    }
+    const trimmed = newProductInput.trim();
+    if (!trimmed) return;
+    const nextConfig: FormConfig = isSample
+      ? { ...formConfig, sampleProductOptions: [...formConfig.sampleProductOptions, trimmed] }
+      : { ...formConfig, quoteProductOptions: [...formConfig.quoteProductOptions, trimmed] };
+    setFormConfig(nextConfig);
+    updateFormConfig(nextConfig);
     setNewProductInput('');
-    showToast('제품 선택 항목이 추가되었습니다.');
+    showToast('제품 선택 항목이 추가되어 즉시 반영되었습니다.');
+  };
+
+  const handleStartEditOption = (idx: number, value: string) => {
+    setEditingIdx(idx);
+    setEditingValue(value);
+  };
+
+  const handleSaveEditOption = (isSample: boolean, idx: number) => {
+    const trimmed = editingValue.trim();
+    if (!trimmed) {
+      showToast('제품 항목 이름을 입력해 주세요.');
+      return;
+    }
+    const nextConfig: FormConfig = isSample
+      ? {
+          ...formConfig,
+          sampleProductOptions: formConfig.sampleProductOptions.map((item, i) => (i === idx ? trimmed : item))
+        }
+      : {
+          ...formConfig,
+          quoteProductOptions: formConfig.quoteProductOptions.map((item, i) => (i === idx ? trimmed : item))
+        };
+    setFormConfig(nextConfig);
+    updateFormConfig(nextConfig);
+    setEditingIdx(null);
+    setEditingValue('');
+    showToast('제품 선택 항목 이름이 수정되었습니다.');
   };
 
   const handleDeleteProductOption = (isSample: boolean, index: number) => {
-    if (isSample) {
-      setFormConfig(prev => ({
-        ...prev,
-        sampleProductOptions: prev.sampleProductOptions.filter((_, i) => i !== index)
-      }));
-    } else {
-      setFormConfig(prev => ({
-        ...prev,
-        quoteProductOptions: prev.quoteProductOptions.filter((_, i) => i !== index)
-      }));
+    const nextConfig: FormConfig = isSample
+      ? { ...formConfig, sampleProductOptions: formConfig.sampleProductOptions.filter((_, i) => i !== index) }
+      : { ...formConfig, quoteProductOptions: formConfig.quoteProductOptions.filter((_, i) => i !== index) };
+    setFormConfig(nextConfig);
+    updateFormConfig(nextConfig);
+    if (editingIdx === index) {
+      setEditingIdx(null);
+      setEditingValue('');
     }
     showToast('선택 항목이 삭제되었습니다.');
   };
 
-  const handleSaveAll = () => {
+  const handleSaveAll = async () => {
     updateFormConfig(formConfig);
-    showToast('신청서 양식 설정이 저장되었습니다.');
+    if (isSupabaseAdminAuthed && supabaseConfig.url && supabaseConfig.anonKey) {
+      await publishPublicContentsToSupabase({ formConfig });
+    } else {
+      showToast('신청서 양식 설정이 저장되었습니다.');
+    }
   };
 
   const isSample = activeTab === 'sample';
@@ -152,17 +188,30 @@ export const FormConfigManager: React.FC = () => {
 
         <button
           onClick={handleSaveAll}
-          className="px-6 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-extrabold shadow-sm flex items-center gap-1.5 cursor-pointer"
+          disabled={isPublishingToSupabase}
+          className="px-6 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#6D242B] text-white text-xs font-extrabold shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
         >
-          <Save className="w-4 h-4" />
-          <span>양식 설정 저장</span>
+          {isPublishingToSupabase ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          <span>{isSupabaseAdminAuthed ? '양식 설정 저장 & DB 게시' : '양식 설정 저장'}</span>
         </button>
       </div>
+
+      {!isSupabaseAdminAuthed && supabaseConfig.url && supabaseConfig.anonKey && (
+        <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <span>
+            다른 브라우저(방문자 화면)에도 변경된 제품 선택 항목을 즉시 반영하려면, Supabase 이메일 관리자 로그인 상태에서 저장하거나 상단의 <strong>[Supabase 게시]</strong> 버튼을 눌러주세요.
+          </span>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-stone-200 pb-2">
         <button
-          onClick={() => setActiveTab('sample')}
+          onClick={() => {
+            setActiveTab('sample');
+            setEditingIdx(null);
+          }}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
             activeTab === 'sample'
               ? 'bg-[#872D35] text-white shadow-2xs'
@@ -172,7 +221,10 @@ export const FormConfigManager: React.FC = () => {
           사업자 무료 샘플 신청서 양식
         </button>
         <button
-          onClick={() => setActiveTab('quote')}
+          onClick={() => {
+            setActiveTab('quote');
+            setEditingIdx(null);
+          }}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
             activeTab === 'quote'
               ? 'bg-[#872D35] text-white shadow-2xs'
@@ -250,14 +302,64 @@ export const FormConfigManager: React.FC = () => {
 
         <div className="space-y-2">
           {currentProductOptions.map((opt, idx) => (
-            <div key={idx} className="p-3 rounded-xl border border-stone-200 bg-stone-50 flex items-center justify-between text-xs">
-              <span className="font-bold text-stone-800">{opt}</span>
-              <button
-                onClick={() => handleDeleteProductOption(isSample, idx)}
-                className="text-stone-400 hover:text-red-600 p-1 cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+            <div key={idx} className="p-3 rounded-xl border border-stone-200 bg-stone-50 flex items-center justify-between gap-2 text-xs">
+              {editingIdx === idx ? (
+                <div className="flex-1 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={editingValue}
+                    onChange={(e) => setEditingValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveEditOption(isSample, idx);
+                      }
+                    }}
+                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-[#872D35] bg-white text-xs font-bold focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveEditOption(isSample, idx)}
+                    className="px-2.5 py-1.5 rounded-lg bg-[#872D35] text-white font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>확인</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingIdx(null);
+                      setEditingValue('');
+                    }}
+                    className="p-1.5 text-stone-400 hover:text-stone-700 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <span className="font-bold text-stone-800">{opt}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditOption(idx, opt)}
+                      className="text-stone-400 hover:text-blue-600 p-1 cursor-pointer"
+                      title="항목 이름 수정"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProductOption(isSample, idx)}
+                      className="text-stone-400 hover:text-red-600 p-1 cursor-pointer"
+                      title="항목 삭제"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>

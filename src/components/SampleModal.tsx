@@ -44,7 +44,7 @@ export const SampleModal: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName || !formData.phone || !formData.contactPerson) {
-      alert('상호명, 성함, 연락처를 입력해 주세요.');
+      showToast('상호명, 성함, 연락처를 입력해 주세요.');
       return;
     }
 
@@ -108,7 +108,7 @@ export const SampleModal: React.FC = () => {
               <Sparkles className="w-4 h-4" />
             </span>
             <h3 className="text-base font-black text-slate-900">
-              사업자 무료 샘플 1kg 신청
+              사업자 무료 샘플 신청
             </h3>
           </div>
           <button
@@ -147,7 +147,7 @@ export const SampleModal: React.FC = () => {
                   전국 외식업 사업자 대상 택배비 전액 무료 지원
                 </div>
                 <p className="text-blue-800 text-[11px]">
-                  푸드홈 시그니처 보쌈무김치 1kg + 최신 B2B 단가표를 함께 발송해 드립니다.
+                  푸드홈 시그니처 보쌈무김치 무료 샘플 + 최신 B2B 단가표를 함께 발송해 드립니다.
                 </p>
               </div>
 
@@ -252,7 +252,7 @@ export const SampleModal: React.FC = () => {
                 ) : (
                   <>
                     <Send className="w-3.5 h-3.5" />
-                    <span>무료 샘플 1kg 즉시 신청</span>
+                    <span>무료 샘플 즉시 신청</span>
                   </>
                 )}
               </button>

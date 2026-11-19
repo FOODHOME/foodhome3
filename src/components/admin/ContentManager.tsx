@@ -441,7 +441,7 @@ export const ContentManager: React.FC = () => {
       description: '푸드홈만의 특허 수분제어 절임 공법으로 아삭함이 오래 유지되는 신제품입니다.',
       imageUrl: 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?auto=format&fit=crop&w=800&q=80',
       bulkPriceGuide: '외식업 사업자 회원 전용 도매 납품단가 제공 (전화 문의)',
-      buttonText: '무료 샘플 1kg 신청',
+      buttonText: '무료 샘플 신청',
       buttonAction: 'sample-board-write',
       visible: true,
       order: state.products.length + 1
@@ -1981,9 +1981,9 @@ export const ContentManager: React.FC = () => {
                         </label>
                         <input
                           type="text"
-                          value={currentProduct.buttonText || '무료 샘플 1kg 신청'}
+                          value={currentProduct.buttonText || '무료 샘플 신청'}
                           onChange={(e) => handleUpdateCurrentProduct({ buttonText: e.target.value })}
-                          placeholder="예: 무료 샘플 1kg 신청"
+                          placeholder="예: 무료 샘플 신청"
                           className="w-full px-3 py-2 rounded-xl border border-stone-200 text-xs bg-white font-bold text-[#872D35]"
                         />
                       </div>
@@ -2177,7 +2177,7 @@ export const ContentManager: React.FC = () => {
                             <span className="font-bold text-[#872D35] truncate max-w-[180px]">{currentProduct.bulkPriceGuide}</span>
                           </div>
                           <button className="w-full py-2 bg-[#872D35] text-white text-xs font-bold rounded-lg mt-2">
-                            {currentProduct.buttonText || '무료 샘플 1kg 신청'}
+                            {currentProduct.buttonText || '무료 샘플 신청'}
                           </button>
                         </div>
                       </div>

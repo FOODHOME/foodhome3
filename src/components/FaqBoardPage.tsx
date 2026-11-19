@@ -263,7 +263,7 @@ export const FaqBoardPage: React.FC = () => {
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#872D35] text-white text-xs font-bold hover:bg-[#6E1D24] transition-colors cursor-pointer"
                               >
                                 <Package className="w-3.5 h-3.5" />
-                                <span>지금 바로 무료 샘플 1kg 신청하기 →</span>
+                                <span>지금 바로 무료 샘플 신청하기 →</span>
                               </button>
                             </div>
                           )}
@@ -310,7 +310,7 @@ export const FaqBoardPage: React.FC = () => {
                 <Package className="w-5 h-5" />
               </div>
               <h4 className="text-base font-extrabold text-stone-900">
-                식당 사장님 전용 1kg 무료 샘플
+                식당 사장님 전용 무료 샘플
               </h4>
               <p className="text-xs text-stone-600 mt-1 leading-relaxed">
                 현재 외식업 매장을 운영 중이시거나 신규 창업을 준비 중이시라면, 제품비와 냉장 택배비 전액 무료로 먼저 맛을 검증해 보세요.

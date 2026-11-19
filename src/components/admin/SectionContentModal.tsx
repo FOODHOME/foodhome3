@@ -527,7 +527,7 @@ export const SectionContentModal: React.FC<SectionContentModalProps> = ({
                   <label className="block text-[11px] font-bold text-stone-600 mb-1">무료 샘플 안내 문구</label>
                   <textarea
                     rows={2}
-                    value={formContent.sampleGuideText || '외식업 사업자등록증이 있으신 대표님께 1kg 무료 샘플팩(배송비 전액 지원)을 보내드립니다.'}
+                    value={formContent.sampleGuideText || '외식업 사업자등록증이 있으신 대표님께 무료 샘플팩(배송비 전액 지원)을 보내드립니다.'}
                     onChange={(e) => handleFieldChange('sampleGuideText', e.target.value)}
                     className="w-full px-3 py-2 border border-stone-200 rounded-lg text-xs bg-white"
                   />

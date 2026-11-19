@@ -106,7 +106,7 @@ export const Header: React.FC = () => {
           submenus: [
             { id: 'sub-who-1', label: 'B2B 대량공급 절차 안내', actionType: 'wholesale' as const, target: '' },
             { id: 'sub-who-2', label: '프랜차이즈 맞춤 OEM/PB', actionType: 'wholesale' as const, target: '' },
-            { id: 'sub-who-3', label: '사업자 1kg 무료 샘플팩', actionType: 'page' as const, target: 'sample-board-write' }
+            { id: 'sub-who-3', label: '사업자 무료 샘플팩', actionType: 'page' as const, target: 'sample-board-write' }
           ]
         },
         {
@@ -402,7 +402,7 @@ export const Header: React.FC = () => {
             style={{ backgroundColor: state.theme.primaryColor || '#872D35' }}
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>무료 샘플 1kg 신청</span>
+            <span>무료 샘플 신청</span>
           </button>
 
           {/* Mobile Menu Button */}
@@ -454,7 +454,7 @@ export const Header: React.FC = () => {
               style={{ backgroundColor: state.theme.primaryColor || '#872D35' }}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>사업자 무료 샘플 1kg 신청</span>
+              <span>사업자 무료 샘플 신청</span>
             </button>
             <button
               onClick={() => {

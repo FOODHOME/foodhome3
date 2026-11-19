@@ -29,11 +29,11 @@ export const ActionBannersSection: React.FC = () => {
               </div>
 
               <h3 className="text-lg lg:text-xl font-black tracking-tight leading-snug">
-                무료 샘플 1kg 신청
+                무료 샘플 신청
               </h3>
               
               <p className="text-xs text-stone-200 mt-2 leading-relaxed font-normal">
-                보쌈·족발 사장님을 위한 1kg 무료 테스팅팩! 택배비 전액 푸드홈 부담으로 매장까지 신선 배송해 드립니다.
+                보쌈·족발 사장님을 위한 무료 테스팅팩! 택배비 전액 푸드홈 부담으로 매장까지 신선 배송해 드립니다.
               </p>
             </div>
 

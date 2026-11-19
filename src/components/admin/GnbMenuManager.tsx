@@ -78,7 +78,7 @@ export const SUB_MENU_OPTIONS: Record<string, { id: string; label: string }[]> =
   'wholesale-guide': [
     { id: 'steps', label: 'B2B 대량공급 절차 안내' },
     { id: 'oem', label: '프랜차이즈 맞춤 OEM/PB' },
-    { id: 'sample-pack', label: '사업자 1kg 무료 샘플팩' }
+    { id: 'sample-pack', label: '사업자 무료 샘플팩' }
   ],
   home: [
     { id: 'hero-section', label: '메인 상단 비주얼 배너' },

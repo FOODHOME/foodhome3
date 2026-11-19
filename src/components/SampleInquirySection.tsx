@@ -44,7 +44,7 @@ export const SampleInquirySection: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName || !formData.phone || !formData.contactPerson) {
-      alert('상호명, 담당자 성함, 연락처는 필수 입력 항목입니다.');
+      showToast('상호명, 담당자 성함, 연락처는 필수 입력 항목입니다.');
       return;
     }
 
@@ -119,13 +119,13 @@ export const SampleInquirySection: React.FC = () => {
               {cfg?.title || (
                 <>
                   외식업 사장님을 위한 <br />
-                  <span className="text-[#872D35]">무료 샘플 1kg</span> & 맞춤 견적
+                  <span className="text-[#872D35]">무료 샘플</span> & 맞춤 견적
                 </>
               )}
             </h2>
 
             <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal">
-              {cfg?.description || '식자재는 맛과 아삭함을 직접 경험해보셔야 결정하실 수 있습니다. 현재 매장을 운영 중이신 사업자 또는 창업 예정자분들께 푸드홈 명품 보쌈무김치 1kg 무료 샘플팩과 규격 단가표를 전액 무료로 배송해 드립니다.'}
+              {cfg?.description || '식자재는 맛과 아삭함을 직접 경험해보셔야 결정하실 수 있습니다. 현재 매장을 운영 중이신 사업자 또는 창업 예정자분들께 푸드홈 명품 보쌈무김치 무료 샘플팩과 규격 단가표를 전액 무료로 배송해 드립니다.'}
             </p>
 
             {/* Benefits list */}
@@ -343,7 +343,7 @@ export const SampleInquirySection: React.FC = () => {
                       ) : (
                         <>
                           <Send className="w-3.5 h-3.5" />
-                          <span>무료 샘플 1kg 신청서 제출하기</span>
+                          <span>무료 샘플 신청서 제출하기</span>
                         </>
                       )}
                     </button>

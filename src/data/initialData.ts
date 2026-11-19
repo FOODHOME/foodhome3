@@ -58,7 +58,7 @@ export const initialData: AppState = {
         submenus: [
           { id: 'sub-who-1', label: '1:1 대량 납품 견적 상담', actionType: 'page', target: 'quote-board' },
           { id: 'sub-who-2', label: '프랜차이즈 맞춤 OEM/PB', actionType: 'page', target: 'quote-board-write' },
-          { id: 'sub-who-3', label: '사업자 1kg 무료 샘플팩', actionType: 'page', target: 'sample-board-write' }
+          { id: 'sub-who-3', label: '사업자 무료 샘플팩', actionType: 'page', target: 'sample-board-write' }
         ]
       },
       {
@@ -91,7 +91,7 @@ export const initialData: AppState = {
         primaryButtonText: '제품 자세히 보기',
         primaryButtonLink: 'products',
         primaryButtonAction: 'products',
-        secondaryButtonText: '무료 샘플 1kg 신청',
+        secondaryButtonText: '무료 샘플 신청',
         secondaryButtonLink: 'sample-board',
         secondaryButtonAction: 'sample',
         order: 1,
@@ -120,7 +120,7 @@ export const initialData: AppState = {
         tagline: 'B2B WHOLESALE & SUPPLY',
         title: '전국 480개 외식 파트너의 선택',
         subtitle: '프랜차이즈 맞춤 납품 & 식자재 공급',
-        description: '물류 편차 없는 균일한 품질, 철저한 안심 위생 관리. 사업자 고객님께 1kg 무료 샘플팩을 전액 무료로 배송해 드립니다.',
+        description: '물류 편차 없는 균일한 품질, 철저한 안심 위생 관리. 사업자 고객님께 무료 샘플팩을 전액 무료로 배송해 드립니다.',
         subDescription: '식자재 원가 절감 솔루션 · 가맹점 만족도 98.8%',
         imageUrl: './images/banner_b2b.jpg',
         mobileImageUrl: './images/banner_b2b.jpg',
@@ -233,7 +233,7 @@ export const initialData: AppState = {
     faqItems: [
       {
         id: 'faq-1',
-        question: '무료 샘플 1kg 신청 자격과 배송비는 어떻게 되나요?',
+        question: '무료 샘플 신청 자격과 배송비는 어떻게 되나요?',
         answer: '현재 족발, 보쌈, 삼겹살, 순대국밥 등 일반음식점을 운영 중이시거나 신규 창업을 준비 중인 사업자분이라면 누구나 신청 가능합니다. 제품값은 물론 우체국 냉장 택배비까지 푸드홈이 100% 전액 지원해 드립니다.',
         category: '샘플신청'
       },
@@ -394,7 +394,7 @@ export const initialData: AppState = {
     deliveryRegions: '수도권 및 전국 전 지역 (제주 및 도서산간 별도 문의)',
     deliveryMethods: '전국 냉장 콜드체인 익일 직배송 / 물류센터 정기 입고',
     deliverySteps: [
-      { step: 1, title: '샘플 신청 & 품질 검증', desc: '사업자 무료 1kg 샘플팩을 먼저 받아보시고 품질을 확인하세요.' },
+      { step: 1, title: '샘플 신청 & 품질 검증', desc: '사업자 무료 샘플팩을 먼저 받아보시고 품질을 확인하세요.' },
       { step: 2, title: '1:1 견적 상담 & 맞춤 단가 협의', desc: '예상 월 소진량에 따른 최적의 납품 단가를 제안해 드립니다.' },
       { step: 3, title: '발주 주기 확정 & 정기 직배송', desc: '원하시는 요일과 주기에 맞추어 매장 냉장고까지 신선하게 공급됩니다.' }
     ],
@@ -403,7 +403,7 @@ export const initialData: AppState = {
     // 4. Customer Service Content
     csNoticeTitle: '푸드홈 B2B 파트너 고객센터',
     csNoticeDesc: '주문, 배송, 대량 견적 및 OEM 상담은 푸드홈 전담팀이 빠르고 친절하게 안내해 드립니다.',
-    sampleGuideText: '외식업 사업자등록증이 있으신 대표님께 1kg 무료 샘플팩(배송비 전액 지원)을 보내드립니다.',
+    sampleGuideText: '외식업 사업자등록증이 있으신 대표님께 무료 샘플팩(배송비 전액 지원)을 보내드립니다.',
     quoteGuideText: '월 100kg 이상 정기 납품 및 프랜차이즈 PB/OEM 전용 단가 상담을 지원합니다.',
 
     // 5. FAQ Dynamic Categories
@@ -599,11 +599,11 @@ export const initialData: AppState = {
       },
       {
         id: 'inquiry',
-        name: '하단 1kg 무료 샘플 간편 신청',
-        badge: 'FREE 1KG SAMPLE',
-        title: '직접 맛을 보시고 결정하세요. 1kg 무료 샘플팩 신청 접수 중',
+        name: '하단 무료 샘플 간편 신청',
+        badge: 'FREE SAMPLE',
+        title: '직접 맛을 보시고 결정하세요. 무료 샘플팩 신청 접수 중',
         description: '사업자등록증을 보유하신 모든 외식업 대표님께 푸드홈 시그니처 보쌈무김치를 무료로 발송해 드립니다.',
-        buttonText: '무료 샘플 1kg 신청하기',
+        buttonText: '무료 샘플 신청하기',
         buttonLink: 'sample-board-write',
         visible: true,
         order: 10
@@ -771,11 +771,11 @@ export const initialData: AppState = {
     },
     {
       id: 'post-4',
-      title: '[안내] 신규 외식업 사장님을 위한 2026 \'보쌈무김치 1kg 무료 샘플팩\' 지원 정책',
+      title: '[안내] 신규 외식업 사장님을 위한 2026 \'보쌈무김치 무료 샘플팩\' 지원 정책',
       category: '이벤트',
       author: '고객지원센터',
       date: '2026-01-20',
-      content: '맛을 보지 않고는 식자재를 바꿀 수 없다는 사장님들의 마음을 깊이 이해합니다. 현재 족발, 보쌈, 삼겹살, 순대국밥 전문점을 운영 중이시거나 창업을 준비 중인 사업자분들께 푸드홈 시그니처 보쌈무김치 1kg 무료 샘플을 택배비까지 전액 지원하여 보내드립니다.',
+      content: '맛을 보지 않고는 식자재를 바꿀 수 없다는 사장님들의 마음을 깊이 이해합니다. 현재 족발, 보쌈, 삼겹살, 순대국밥 전문점을 운영 중이시거나 창업을 준비 중인 사업자분들께 푸드홈 시그니처 보쌈무김치 무료 샘플을 택배비까지 전액 지원하여 보내드립니다.',
       readCount: 5690,
       thumbnail: './images/prod_bossam_mu.jpg',
       tags: ['무료샘플', '사업자전용', '체험이벤트'],
@@ -1048,7 +1048,7 @@ export const initialData: AppState = {
   ],
   formConfig: {
     sampleFormFields: [
-      { id: 'f-s-1', name: 'title', label: '신청 제목', type: 'text', required: true, order: 1, enabled: true, placeholder: '예: [서울 강남] 보쌈 전문점 1kg 무료 샘플 신청합니다' },
+      { id: 'f-s-1', name: 'title', label: '신청 제목', type: 'text', required: true, order: 1, enabled: true, placeholder: '예: [서울 강남] 보쌈 전문점 무료 샘플 신청합니다' },
       { id: 'f-s-2', name: 'storeName', label: '상호명 (사업체명)', type: 'text', required: true, order: 2, enabled: true, placeholder: '운영 중이신 매장 상호명 입력' },
       { id: 'f-s-3', name: 'contactPerson', label: '담당자 / 대표자 성함', type: 'text', required: true, order: 3, enabled: true, placeholder: '성함 입력' },
       { id: 'f-s-4', name: 'phone', label: '휴대전화 연락처', type: 'tel', required: true, order: 4, enabled: true, placeholder: '010-0000-0000 (배송 안내용)' },
@@ -1058,10 +1058,10 @@ export const initialData: AppState = {
       { id: 'f-s-8', name: 'password', label: '게시글 열람 비밀번호 (4자리 이상)', type: 'password', required: true, order: 8, enabled: true, placeholder: '비공개 글 열람용 비밀번호' }
     ],
     sampleProductOptions: [
-      '명품 보쌈무김치 1kg (대표 인기품목)',
-      '비법 보쌈김칫속(보쌈속) 1kg',
-      '업소용 특제 굴보쌈 양념 500g',
-      '특허 수분제어 맞춤 절임무 1kg'
+      '명품 보쌈무김치 (대표 인기품목)',
+      '비법 보쌈김칫속(보쌈속)',
+      '업소용 특제 굴보쌈 양념',
+      '특허 수분제어 맞춤 절임무'
     ],
     sampleStatuses: ['접수대기', '접수완료', '답변완료', '배송준비', '배송완료', '상담완료'],
     samplePrivacyText: '개인정보보호법에 의거하여 무료 샘플 발송 및 B2B 상담 목적으로만 성함, 연락처, 주소를 수집하며, 발송 완료 3개월 후 안전하게 파기됩니다.',
@@ -1093,7 +1093,7 @@ export const initialData: AppState = {
     metaDescription: '30년 전통 비법양념과 특허 수분제어로 빚어낸 명품 보쌈무김치, 굴보쌈 김칫속 전문 제조 푸드홈. 전국 480여 개 프랜차이즈 및 맛집 납품. 무료 샘플 신청 지원.',
     keywords: '푸드홈, FOODHOME, 보쌈무김치, 무김치, 김칫속, 보쌈김치, 족발무김치, 업소용김치, 외식업식자재, 보쌈식자재납품, 안심김치',
     ogTitle: '푸드홈(FOODHOME) - 대한민국 1등 보쌈무김치·김칫속 전문 제조업체',
-    ogDescription: '물 생김 없이 끝까지 아삭한 특허 수분제어 보쌈무김치. 전국 외식업 대표님을 위한 무료 1kg 샘플팩 신청 접수 중.',
+    ogDescription: '물 생김 없이 끝까지 아삭한 특허 수분제어 보쌈무김치. 전국 외식업 대표님을 위한 무료 샘플팩 신청 접수 중.',
     ogImageUrl: './images/banner_bossam.jpg',
     canonicalUrl: 'https://foodhome.co.kr'
   },

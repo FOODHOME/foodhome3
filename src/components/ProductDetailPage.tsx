@@ -332,13 +332,13 @@ export const ProductDetailPage: React.FC = () => {
               <div className="space-y-2.5 pt-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   
-                  {/* Primary CTA: Free Sample 1kg */}
+                  {/* Primary CTA: Free Sample */}
                   <button
                     onClick={handleRequestSample}
                     className="w-full py-3.5 px-4 rounded-xl bg-[#872D35] hover:bg-[#6D242B] text-white text-xs sm:text-sm font-black flex items-center justify-center gap-2 shadow-sm transition-all hover:scale-[1.01] cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4 text-amber-300" />
-                    <span>{product.buttonText || '사업자 1kg 무료 샘플 신청'}</span>
+                    <span>{product.buttonText || '사업자 무료 샘플 신청'}</span>
                   </button>
 
                   {/* Secondary CTA: Wholesale Quote Consultation */}

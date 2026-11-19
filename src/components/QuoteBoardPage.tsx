@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { QuoteInquiry } from '../types';
 import { 
@@ -50,6 +50,7 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
     updateQuoteByVisitor,
     deleteQuoteByVisitor,
     refreshBoardsFromSupabase,
+    syncPublicConfigForVisitor,
     isBoardSyncing,
     showToast,
     setActivePage
@@ -57,7 +58,8 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
 
   useEffect(() => {
     refreshBoardsFromSupabase();
-  }, [refreshBoardsFromSupabase]);
+    syncPublicConfigForVisitor();
+  }, [refreshBoardsFromSupabase, syncPublicConfigForVisitor]);
 
   const [viewMode, setViewMode] = useState<'list' | 'write' | 'detail'>(initialViewMode);
   const [selectedQuote, setSelectedQuote] = useState<QuoteInquiry | null>(null);
@@ -81,12 +83,20 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
   const [statusFilter, setStatusFilter] = useState<string>('전체');
 
   // Write Form State
-  const productChoices = state.formConfig?.quoteProductOptions || [
-    '명품 보쌈무김치 (업소용 10kg)',
-    '비법 보쌈김칫속 (업소용 10kg)',
-    '수제 절임무 벌크 (20kg)',
-    '프랜차이즈 맞춤 OEM/PB 전용 레시피'
-  ];
+  const productChoices = useMemo(() => {
+    if (
+      Array.isArray(state.formConfig?.quoteProductOptions) &&
+      state.formConfig.quoteProductOptions.length > 0
+    ) {
+      return state.formConfig.quoteProductOptions;
+    }
+    return [
+      '명품 보쌈무김치 (업소용 10kg)',
+      '비법 보쌈김칫속 (업소용 10kg)',
+      '수제 절임무 벌크 (20kg)',
+      '프랜차이즈 맞춤 OEM/PB 전용 레시피'
+    ];
+  }, [state.formConfig?.quoteProductOptions]);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -96,7 +106,7 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
     email: '',
     region: '',
     businessType: '일반음식점 (보쌈·족발)',
-    interestedProducts: ['명품 보쌈무김치 (업소용 10kg)'],
+    interestedProducts: productChoices.slice(0, 1),
     monthlyVolume: '',
     deliverySchedule: '',
     message: '',
@@ -105,6 +115,20 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
     agreedPrivacy: true
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setFormData(prev => {
+      const valid = prev.interestedProducts.filter(p => productChoices.includes(p));
+      if (valid.length > 0) {
+        if (valid.length === prev.interestedProducts.length) return prev;
+        return { ...prev, interestedProducts: valid };
+      }
+      return {
+        ...prev,
+        interestedProducts: productChoices.length > 0 ? [productChoices[0]] : []
+      };
+    });
+  }, [productChoices]);
 
   // Admin Reply Input State
   const [adminReplyText, setAdminReplyText] = useState('');
@@ -116,7 +140,7 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
       const exists = prev.interestedProducts.includes(productName);
       if (exists) {
         if (prev.interestedProducts.length <= 1) {
-          alert('최소 1개 이상의 관심 제품을 선택해 주세요.');
+          showToast('최소 1개 이상의 관심 제품을 선택해 주세요.');
           return prev;
         }
         return {
@@ -281,7 +305,7 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
         email: '',
         region: '',
         businessType: '일반음식점 (보쌈·족발)',
-        interestedProducts: ['명품 보쌈무김치 (업소용 10kg)'],
+        interestedProducts: productChoices.slice(0, 1),
         monthlyVolume: '',
         deliverySchedule: '',
         message: '',

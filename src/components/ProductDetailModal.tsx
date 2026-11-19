@@ -168,7 +168,7 @@ export const ProductDetailModal: React.FC = () => {
               className="px-5 py-2 text-xs font-bold text-white rounded-lg shadow-2xs hover:bg-[#6D242B] transition-colors flex items-center gap-1.5 cursor-pointer bg-[#872D35]"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>이 제품 무료 샘플 1kg 신청</span>
+              <span>이 제품 무료 샘플 신청</span>
             </button>
           </div>
         </div>

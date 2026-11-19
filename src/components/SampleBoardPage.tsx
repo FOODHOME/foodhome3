@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { B2BInquiry } from '../types';
 import { 
@@ -42,6 +42,7 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
     updateSamplePostByVisitor,
     deleteSamplePostByVisitor,
     refreshBoardsFromSupabase,
+    syncPublicConfigForVisitor,
     isBoardSyncing,
     showToast,
     setActivePage
@@ -49,7 +50,23 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
 
   useEffect(() => {
     refreshBoardsFromSupabase();
-  }, [refreshBoardsFromSupabase]);
+    syncPublicConfigForVisitor();
+  }, [refreshBoardsFromSupabase, syncPublicConfigForVisitor]);
+
+  const sampleProductsList = useMemo(() => {
+    if (
+      Array.isArray(state.formConfig?.sampleProductOptions) &&
+      state.formConfig.sampleProductOptions.length > 0
+    ) {
+      return state.formConfig.sampleProductOptions;
+    }
+    return [
+      '명품 보쌈무김치',
+      '비법 보쌈김칫속(보쌈속)',
+      '업소용 특제 굴보쌈 양념',
+      '특허 수분제어 맞춤 절임무'
+    ];
+  }, [state.formConfig?.sampleProductOptions]);
 
   const [viewMode, setViewMode] = useState<'list' | 'write' | 'detail'>(initialViewMode);
   const [selectedPost, setSelectedPost] = useState<B2BInquiry | null>(null);
@@ -79,31 +96,39 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
     contactPerson: '',
     phone: '',
     address: '',
-    selectedProducts: ['명품 보쌈무김치 1kg', '비법 보쌈김칫속 1kg'],
+    selectedProducts: sampleProductsList.slice(0, 1),
     message: '',
     password: '',
     agreedPrivacy: true
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Keep formData.selectedProducts valid when admin updates sampleProductOptions or Supabase config loads
+  useEffect(() => {
+    setFormData(prev => {
+      const validSelected = prev.selectedProducts.filter(p => sampleProductsList.includes(p));
+      if (validSelected.length > 0) {
+        if (validSelected.length === prev.selectedProducts.length) return prev;
+        return { ...prev, selectedProducts: validSelected };
+      }
+      return {
+        ...prev,
+        selectedProducts: sampleProductsList.length > 0 ? [sampleProductsList[0]] : []
+      };
+    });
+  }, [sampleProductsList]);
+
   // Admin Reply Input State
   const [adminReplyText, setAdminReplyText] = useState('');
   const [adminReplyStatus, setAdminReplyStatus] = useState<B2BInquiry['status']>('답변완료');
   const [isReplying, setIsReplying] = useState(false);
-
-  const sampleProductsList = [
-    '명품 보쌈무김치 1kg',
-    '비법 보쌈김칫속 1kg',
-    '업소용 특제 굴보쌈 양념 500g',
-    '특허 수분제어 맞춤 절임무 1kg'
-  ];
 
   const handleProductToggle = (productName: string) => {
     setFormData(prev => {
       const exists = prev.selectedProducts.includes(productName);
       if (exists) {
         if (prev.selectedProducts.length <= 1) {
-          alert('최소 1개 이상의 샘플 품목을 선택해 주세요.');
+          showToast('최소 1개 이상의 샘플 품목을 선택해 주세요.');
           return prev;
         }
         return {
@@ -251,7 +276,7 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
         contactPerson: '',
         phone: '',
         address: '',
-        selectedProducts: ['명품 보쌈무김치 1kg', '비법 보쌈김칫속 1kg'],
+        selectedProducts: sampleProductsList.slice(0, 1),
         message: '',
         password: '',
         agreedPrivacy: true
@@ -361,7 +386,7 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
             샘플신청 게시판
           </h1>
           <p className="mt-2 text-xs sm:text-sm text-stone-200 font-medium max-w-xl mx-auto drop-shadow-sm">
-            외식업 대표님을 위한 1kg 무료 샘플팩 신청 게시판입니다. 개인정보 보호를 위해 안전한 비밀글로 접수됩니다.
+            외식업 대표님을 위한 무료 샘플팩 신청 게시판입니다. 개인정보 보호를 위해 안전한 비밀글로 접수됩니다.
           </p>
         </div>
       </section>
@@ -570,7 +595,7 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
             <div className="bg-white rounded-3xl p-6 sm:p-10 border border-stone-200 shadow-sm">
               <div className="border-b border-stone-100 pb-5 mb-6">
                 <h2 className="text-xl sm:text-2xl font-black text-stone-900">
-                  사업자 1kg 무료 샘플팩 신청
+                  사업자 무료 샘플팩 신청
                 </h2>
                 <p className="text-xs sm:text-sm text-stone-500 mt-1">
                   외식업 매장 주방에서 직접 품질과 식감을 검증해 보실 수 있도록 익일 냉장 발송해 드립니다.
@@ -724,7 +749,9 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
                       className="mt-0.5 rounded text-[#872D35] focus:ring-[#872D35] w-4 h-4 cursor-pointer"
                     />
                     <span className="text-xs text-stone-600 leading-tight">
-                      <strong className="text-stone-800">[필수]</strong> 개인정보 수집 및 이용 동의 (수집항목: 상호명, 담당자명, 연락처, 주소 / 이용목적: 무료 샘플 배송 및 상담 확인 / 보유기간: 목적 달성 시 즉시 파기)
+                      <strong className="text-stone-800">[필수]</strong>{' '}
+                      {state.formConfig?.samplePrivacyText ||
+                        '개인정보 수집 및 이용 동의 (수집항목: 상호명, 담당자명, 연락처, 주소 / 이용목적: 무료 샘플 배송 및 상담 확인 / 보유기간: 목적 달성 시 즉시 파기)'}
                     </span>
                   </label>
                 </div>

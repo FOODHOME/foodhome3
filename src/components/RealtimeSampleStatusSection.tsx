@@ -79,7 +79,7 @@ export const RealtimeSampleStatusSection: React.FC = () => {
 
     const region = inq.region ? inq.region.split(' ').slice(0, 2).join(' ') : '전국 외식업소';
     const store = inq.storeName || inq.companyName ? `${(inq.storeName || inq.companyName).slice(0, 2)}**` : '사업자';
-    return `[${region}] ${store} 대표님 무료 샘플 1kg 신청`;
+    return `[${region}] ${store} 대표님 무료 샘플 신청`;
   };
 
   return (
@@ -97,7 +97,7 @@ export const RealtimeSampleStatusSection: React.FC = () => {
               실시간 무료 샘플 신청 현황
             </h2>
             <p className="text-xs sm:text-sm text-stone-600 mt-1">
-              전국 외식업소 대표님들의 사업자 1kg 무료 샘플팩 신청이 실시간으로 안전하게 접수되고 있습니다.
+              전국 외식업소 대표님들의 사업자 무료 샘플팩 신청이 실시간으로 안전하게 접수되고 있습니다.
             </p>
           </div>
 

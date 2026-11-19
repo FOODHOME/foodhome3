@@ -230,7 +230,7 @@ export const ProductSection: React.FC = () => {
                 {/* Bulk Price Notice */}
                 <div className="mt-2.5 text-center">
                   <span className="text-[10px] text-slate-500">
-                    사업자 전용 단가 협의 가능 · 무료 샘플 1kg 지원
+                    사업자 전용 단가 협의 가능 · 무료 샘플 지원
                   </span>
                 </div>
               </div>

@@ -45,7 +45,7 @@ export const MainSectionsManager: React.FC = () => {
     { id: 'process', name: '안심 위생 제조 공정', badge: 'CLEAN AUTOMATION PROCESS', title: '엄격한 기준의 스마트 클린 제조 시스템', description: '산지 계약재배 입고부터 에어샤워, 금속검출기 통과까지 철저하게 관리합니다.', visible: true, order: 8 },
     { id: 'reviews', name: '고객사 추천평 (외식업 파트너 후기)', badge: 'PARTNER REVIEWS', title: '전국 프랜차이즈 및 외식업체 대표님들의 후기', description: '고기 맛을 살려주는 보쌈무김치와 김칫속으로 매장 객단가가 상승했습니다.', visible: true, order: 9 },
     { id: 'posts', name: '공지사항 & 외식 레시피 가이드', badge: 'NEWS & NOTICES', title: '푸드홈 공지사항 & 외식 레시피 가이드', description: '위생안전 소식부터 보쌈 매장 사장님들을 위한 조리 꿀팁, 프랜차이즈 납품 소식을 전합니다.', visible: true, order: 10 },
-    { id: 'inquiry', name: '하단 1kg 무료 샘플 간편 신청', badge: 'FREE 1KG SAMPLE', title: '직접 맛을 보시고 결정하세요. 1kg 무료 샘플팩 신청 접수 중', description: '사업자등록증을 보유하신 모든 외식업 대표님께 푸드홈 시그니처 보쌈무김치를 무료로 발송해 드립니다.', buttonText: '무료 샘플 1kg 신청하기', buttonLink: 'sample-board-write', visible: true, order: 11 }
+    { id: 'inquiry', name: '하단 무료 샘플 간편 신청', badge: 'FREE SAMPLE', title: '직접 맛을 보시고 결정하세요. 무료 샘플팩 신청 접수 중', description: '사업자등록증을 보유하신 모든 외식업 대표님께 푸드홈 시그니처 보쌈무김치를 무료로 발송해 드립니다.', buttonText: '무료 샘플 신청하기', buttonLink: 'sample-board-write', visible: true, order: 11 }
   ];
 
   const getMergedSections = (): MainSectionConfig[] => {
@@ -379,7 +379,7 @@ export const MainSectionsManager: React.FC = () => {
                       type="text"
                       value={activeEditingSection.buttonText || ''}
                       onChange={(e) => handleFieldChange(activeEditingSection.id, 'buttonText', e.target.value)}
-                      placeholder="예: 무료 샘플 1kg 신청하기"
+                      placeholder="예: 무료 샘플 신청하기"
                       className="w-full px-3 py-2 rounded-lg border border-stone-200 bg-white"
                     />
                   </div>
