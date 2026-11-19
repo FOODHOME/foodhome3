@@ -11,7 +11,7 @@ import { ContentManager } from './admin/ContentManager';
 import { FormConfigManager } from './admin/FormConfigManager';
 import { SiteInfoManager } from './admin/SiteInfoManager';
 import { AdminAccountManager } from './admin/AdminAccountManager';
-import { DatabaseSqlManager } from './admin/DatabaseSqlManager';
+import { BoardSyncStorageAndSqlPanel } from './admin/DatabaseSqlManager';
 import { NoticeManager } from './admin/NoticeManager';
 import { FaqManager } from './admin/FaqManager';
 import { GnbMenuManager } from './admin/GnbMenuManager';
@@ -1619,6 +1619,9 @@ export const AdminDashboard: React.FC = () => {
                   </p>
                 </div>
               </div>
+
+              {/* 2차: 원격 게시판 동기화, 5MB 저장공간 진단 및 2차/1차 SQL 실행 스크립트 */}
+              <BoardSyncStorageAndSqlPanel />
             </div>
           )}
 
