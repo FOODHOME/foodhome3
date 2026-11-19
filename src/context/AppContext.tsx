@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   AppState, 
   SiteContent, 
@@ -47,7 +47,24 @@ import {
   setPasswordRecoveryPending,
   getSavedRecoveryEmail,
   clearAuthUrlParams,
-  updatePasswordInRecovery
+  updatePasswordInRecovery,
+  fetchBoardPosts,
+  createBoardPostInDb,
+  updateBoardPostInDb,
+  deleteBoardPostInDb,
+  incrementBoardPostReadInDb,
+  migrateLocalPostsToBoardTable,
+  fetchPrivateInquiriesForBoard,
+  submitPrivateInquiryToBoard,
+  unlockPrivateInquiryFromBoard,
+  updatePrivateInquiryByAuthorInBoard,
+  deletePrivateInquiryByAuthorInBoard,
+  adminUpdatePrivateInquiryInBoard,
+  adminDeletePrivateInquiryInBoard,
+  migrateLocalInquiriesAndQuotesToBoard,
+  getLocalStorageUsageStats,
+  migrateDataUrlsInStateToStorage,
+  LocalStorageUsageStats
 } from '../lib/supabase';
 
 interface AppContextType {
@@ -62,10 +79,17 @@ interface AppContextType {
   updateProduct: (id: string, product: Partial<ProductItem>) => void;
   deleteProduct: (id: string) => void;
   
-  // Posts
-  addPost: (post: Omit<PostItem, 'id' | 'readCount' | 'date'>) => void;
-  updatePost: (id: string, post: Partial<PostItem>) => void;
-  deletePost: (id: string) => void;
+  // Posts (Notice / Recipe / Story / Community)
+  addPost: (
+    post: Omit<PostItem, 'id' | 'readCount' | 'date'>,
+    visitorPassword?: string
+  ) => Promise<{ success: boolean; id?: string; syncedToDb?: boolean; error?: string }>;
+  updatePost: (
+    id: string,
+    post: Partial<PostItem>,
+    visitorPassword?: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  deletePost: (id: string, visitorPassword?: string) => Promise<{ success: boolean; error?: string }>;
   incrementPostRead: (id: string) => void;
 
   // Reviews
@@ -146,6 +170,31 @@ interface AppContextType {
   supabaseConfig: { url: string; anonKey: string };
   updateSupabaseConfig: (cfg: { url: string; anonKey: string }) => void;
 
+  // Remote Boards Sync & Storage Diagnostics
+  isBoardSyncing: boolean;
+  boardSyncInfo: {
+    postsTableMissing: boolean;
+    privateTableMissing: boolean;
+    syncedFromSupabase: boolean;
+    lastSyncedAt: string | null;
+    error: string | null;
+  };
+  localStorageStats: LocalStorageUsageStats;
+  localStorageQuotaError: string | null;
+  refreshBoardsFromSupabase: (forceAdmin?: boolean) => Promise<void>;
+  migrateLocalBoardsToSupabase: () => Promise<{
+    success: boolean;
+    postsCount: number;
+    inquiriesCount: number;
+    error?: string;
+  }>;
+  migrateEmbeddedImagesToStorage: () => Promise<{
+    success: boolean;
+    migratedCount: number;
+    failedCount: number;
+    error?: string;
+  }>;
+
   // Password Recovery Flow (Supabase Auth Email OTP verifyOtp)
   isPasswordRecoveryMode: boolean;
   isCheckingRecoverySession: boolean;
@@ -189,9 +238,25 @@ interface AppContextType {
     selectedProducts: string[];
     message: string;
     password: string;
-  }) => Promise<{ success: boolean; id?: string }>;
+  }) => Promise<{ success: boolean; id?: string; syncedToDb?: boolean; error?: string }>;
   updateSamplePostReply: (id: string, reply: string, status?: B2BInquiry['status']) => void;
   verifyPostPassword: (postId: string, passwordInput: string) => boolean;
+  unlockSamplePost: (postId: string, passwordInput: string) => Promise<{
+    verified: boolean;
+    post?: B2BInquiry;
+    passwordHash?: string;
+    error?: string;
+  }>;
+  updateSamplePostByVisitor: (
+    id: string,
+    passwordHash: string,
+    title: string,
+    message: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  deleteSamplePostByVisitor: (
+    id: string,
+    passwordHash: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // 1:1 Quote Inquiries Helpers
   addQuoteInquiry: (quote: {
@@ -208,11 +273,27 @@ interface AppContextType {
     message: string;
     attachments?: { name: string; url?: string; size?: string }[];
     password: string;
-  }) => Promise<{ success: boolean; id?: string }>;
+  }) => Promise<{ success: boolean; id?: string; syncedToDb?: boolean; error?: string }>;
   updateQuoteStatus: (id: string, status: string, adminMemo?: string) => void;
   updateQuoteReply: (id: string, reply: string, status?: string) => void;
   deleteQuoteInquiry: (id: string) => void;
   verifyQuotePassword: (quoteId: string, passwordInput: string) => Promise<boolean>;
+  unlockQuotePost: (quoteId: string, passwordInput: string) => Promise<{
+    verified: boolean;
+    quote?: QuoteInquiry;
+    passwordHash?: string;
+    error?: string;
+  }>;
+  updateQuoteByVisitor: (
+    id: string,
+    passwordHash: string,
+    title: string,
+    message: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  deleteQuoteByVisitor: (
+    id: string,
+    passwordHash: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // Main Banner & Form Config
   updateBanners: (banners: BannerSlide[]) => void;
@@ -220,6 +301,46 @@ interface AppContextType {
 }
 
 const STORAGE_KEY = 'foodhome_app_data_v4';
+const SYNCED_BOARD_IDS_KEY = 'foodhome_synced_board_ids_v1';
+
+interface SyncedBoardIds {
+  posts: string[];
+  inquiries: string[];
+  quotes: string[];
+}
+
+function loadSyncedBoardIds(): SyncedBoardIds {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(SYNCED_BOARD_IDS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return {
+          posts: Array.isArray(parsed?.posts) ? parsed.posts : [],
+          inquiries: Array.isArray(parsed?.inquiries) ? parsed.inquiries : [],
+          quotes: Array.isArray(parsed?.quotes) ? parsed.quotes : []
+        };
+      }
+    }
+  } catch {}
+  return { posts: [], inquiries: [], quotes: [] };
+}
+
+function saveSyncedBoardIds(ids: SyncedBoardIds): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(SYNCED_BOARD_IDS_KEY, JSON.stringify(ids));
+    }
+  } catch {}
+}
+
+function maskKoreanName(nameInput: string): string {
+  const name = (nameInput || '').trim();
+  if (!name) return '고객';
+  if (name.length > 2) return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+  if (name.length === 2) return `${name[0]}*`;
+  return name;
+}
 
 function normalizeStateWithDefaults(
   baseState: AppState,
@@ -349,6 +470,7 @@ function normalizeStateWithDefaults(
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const hadSavedLocalStorageRef = useRef<boolean>(false);
   const [state, setState] = useState<AppState>(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -356,6 +478,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && typeof parsed === 'object') {
+            hadSavedLocalStorageRef.current = true;
             return normalizeStateWithDefaults(initialData, parsed);
           }
         }
@@ -471,6 +594,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => getSavedSupabaseConfig());
   const [isSupabaseAdminAuthed, setIsSupabaseAdminAuthed] = useState(false);
+  const isSupabaseAdminAuthedRef = useRef(isSupabaseAdminAuthed);
+  useEffect(() => {
+    isSupabaseAdminAuthedRef.current = isSupabaseAdminAuthed;
+  }, [isSupabaseAdminAuthed]);
   const [supabaseAdminEmail, setSupabaseAdminEmail] = useState<string | null>(null);
   const [isSyncingFromSupabase, setIsSyncingFromSupabase] = useState(false);
   const [isPublishingToSupabase, setIsPublishingToSupabase] = useState(false);
@@ -485,6 +612,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const [lastSupabaseSyncError, setLastSupabaseSyncError] = useState<string | null>(null);
   const [remoteSiteContentsInfo, setRemoteSiteContentsInfo] = useState<{ exists: boolean; updatedAt: string | null } | null>(null);
+
+  const [isBoardSyncing, setIsBoardSyncing] = useState(false);
+  const [boardSyncInfo, setBoardSyncInfo] = useState<{
+    postsTableMissing: boolean;
+    privateTableMissing: boolean;
+    syncedFromSupabase: boolean;
+    lastSyncedAt: string | null;
+    error: string | null;
+  }>({
+    postsTableMissing: false,
+    privateTableMissing: false,
+    syncedFromSupabase: false,
+    lastSyncedAt: null,
+    error: null
+  });
+  const [localStorageQuotaError, setLocalStorageQuotaError] = useState<string | null>(null);
+  const localStorageStats = useMemo(() => getLocalStorageUsageStats(state), [state]);
 
   const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState<boolean>(() => isPasswordRecoveryPending());
   const [isCheckingRecoverySession, setIsCheckingRecoverySession] = useState<boolean>(() => isPasswordRecoveryPending());
@@ -507,7 +651,164 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedFacilityMedia, setSelectedFacilityMedia] = useState<FacilityMediaItem | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Sync Supabase Auth session & fetch public site_contents on mount / config change
+  const refreshBoardsFromSupabase = useCallback(async (forceAdmin?: boolean) => {
+    const cfg = getSavedSupabaseConfig();
+    if (!cfg.url || !cfg.anonKey) return;
+
+    setIsBoardSyncing(true);
+    const adminMode = typeof forceAdmin === 'boolean' ? forceAdmin : isSupabaseAdminAuthedRef.current;
+
+    const [postsRes, privateRes] = await Promise.all([
+      fetchBoardPosts(adminMode),
+      fetchPrivateInquiriesForBoard(adminMode)
+    ]);
+
+    setIsBoardSyncing(false);
+
+    const prevSynced = loadSyncedBoardIds();
+    const nextSynced: SyncedBoardIds = { ...prevSynced };
+    const syncErrors: string[] = [];
+
+    if (!postsRes.ok && postsRes.error) {
+      syncErrors.push(postsRes.error);
+    }
+    if (!privateRes.ok && privateRes.error) {
+      syncErrors.push(privateRes.error);
+    }
+
+    setBoardSyncInfo({
+      postsTableMissing: Boolean(postsRes.tableMissing),
+      privateTableMissing: Boolean(privateRes.tableMissing),
+      syncedFromSupabase: postsRes.ok || privateRes.ok,
+      lastSyncedAt: new Date().toISOString(),
+      error: syncErrors.length > 0 ? syncErrors[0] : null
+    });
+
+    if (!postsRes.ok && !privateRes.ok) return;
+
+    setState(prev => {
+      let nextPosts = prev.posts;
+      let nextInquiries = prev.inquiries;
+      let nextQuotes = prev.quotes;
+
+      if (postsRes.ok) {
+        const remotePosts = postsRes.posts;
+        if (remotePosts.length > 0 || prevSynced.posts.length > 0) {
+          const remoteIds = new Set(remotePosts.map(p => p.id));
+          const syncedSet = new Set(prevSynced.posts);
+          const unsyncedLocal = hadSavedLocalStorageRef.current
+            ? prev.posts.filter(p => !remoteIds.has(p.id) && !syncedSet.has(p.id))
+            : [];
+          nextPosts = [...remotePosts, ...unsyncedLocal];
+          nextSynced.posts = remotePosts.map(p => p.id);
+        }
+      }
+
+      if (privateRes.ok) {
+        const remoteInq = privateRes.inquiries;
+        if (remoteInq.length > 0 || prevSynced.inquiries.length > 0) {
+          const prevInqMap = new Map(prev.inquiries.map(i => [i.id, i]));
+          const remoteIds = new Set(remoteInq.map(i => i.id));
+          const syncedSet = new Set(prevSynced.inquiries);
+
+          const mergedRemoteInq = remoteInq.map(r => {
+            const local = prevInqMap.get(r.id);
+            if (!local) return r;
+            if (adminMode) return { ...local, ...r };
+            // For public visitor summaries, preserve any locally created or unlocked PII details
+            return {
+              ...r,
+              companyName: local.phone ? local.companyName : r.companyName,
+              storeName: local.phone ? local.storeName : r.storeName,
+              contactPerson: local.phone ? local.contactPerson : r.contactPerson,
+              phone: local.phone || r.phone,
+              email: local.email || r.email,
+              address: local.address || r.address,
+              region: local.region || r.region,
+              selectedProducts:
+                local.selectedProducts && local.selectedProducts.length > 0
+                  ? local.selectedProducts
+                  : r.selectedProducts,
+              message: local.message || r.message,
+              password: local.password,
+              adminReply: r.adminReply
+                ? local.adminReply?.content
+                  ? local.adminReply
+                  : r.adminReply
+                : undefined
+            };
+          });
+
+          const unsyncedLocal = hadSavedLocalStorageRef.current
+            ? prev.inquiries.filter(i => !remoteIds.has(i.id) && !syncedSet.has(i.id))
+            : [];
+          nextInquiries = [...mergedRemoteInq, ...unsyncedLocal];
+          nextSynced.inquiries = remoteInq.map(i => i.id);
+        }
+
+        const remoteQuotes = privateRes.quotes;
+        if (remoteQuotes.length > 0 || prevSynced.quotes.length > 0) {
+          const prevQuoteMap = new Map((prev.quotes || []).map(q => [q.id, q]));
+          const remoteIds = new Set(remoteQuotes.map(q => q.id));
+          const syncedSet = new Set(prevSynced.quotes);
+
+          const mergedRemoteQuotes = remoteQuotes.map(r => {
+            const local = prevQuoteMap.get(r.id);
+            if (!local) return r;
+            if (adminMode) return { ...local, ...r };
+            return {
+              ...r,
+              companyName: local.phone ? local.companyName : r.companyName,
+              contactPerson: local.phone ? local.contactPerson : r.contactPerson,
+              phone: local.phone || r.phone,
+              email: local.email || r.email,
+              region: local.region || r.region,
+              businessType: local.businessType || r.businessType,
+              interestedProducts:
+                local.interestedProducts && local.interestedProducts.length > 0
+                  ? local.interestedProducts
+                  : r.interestedProducts,
+              monthlyVolume: local.monthlyVolume || r.monthlyVolume,
+              deliverySchedule: local.deliverySchedule || r.deliverySchedule,
+              message: local.message || r.message,
+              attachments:
+                local.attachments && local.attachments.length > 0 ? local.attachments : r.attachments,
+              passwordHash: local.passwordHash || r.passwordHash,
+              rawPasswordHint: local.rawPasswordHint,
+              adminReply: r.adminReply
+                ? local.adminReply?.content
+                  ? local.adminReply
+                  : r.adminReply
+                : undefined
+            };
+          });
+
+          const unsyncedLocal = hadSavedLocalStorageRef.current
+            ? (prev.quotes || []).filter(q => !remoteIds.has(q.id) && !syncedSet.has(q.id))
+            : [];
+          nextQuotes = [...mergedRemoteQuotes, ...unsyncedLocal];
+          nextSynced.quotes = remoteQuotes.map(q => q.id);
+        }
+      }
+
+      saveSyncedBoardIds(nextSynced);
+      if (
+        nextPosts === prev.posts &&
+        nextInquiries === prev.inquiries &&
+        nextQuotes === prev.quotes
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        posts: nextPosts,
+        inquiries: nextInquiries,
+        quotes: nextQuotes
+      };
+    });
+  }, []);
+
+  // Sync Supabase Auth session & fetch public site_contents + remote boards on mount / config change
   useEffect(() => {
     let cancelled = false;
     const legacyNotice = consumeLegacyAuthUrlNotice();
@@ -605,6 +906,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           } else {
             sessionAdminOk = await isSiteAdmin(authUser.id);
             if (!cancelled) {
+              isSupabaseAdminAuthedRef.current = sessionAdminOk;
               setIsSupabaseAdminAuthed(sessionAdminOk);
               setSupabaseAdminEmail(sessionAdminOk ? (authUser.email || null) : null);
               if (sessionAdminOk) {
@@ -617,6 +919,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
           }
         } else if (!cancelled) {
+          isSupabaseAdminAuthedRef.current = false;
           setIsSupabaseAdminAuthed(false);
           setSupabaseAdminEmail(null);
         }
@@ -634,29 +937,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!res.ok) {
         setLastSupabaseSyncError(res.error || null);
-        // Never overwrite or clear localStorage when DB fails or is unconfigured
-        return;
+      } else {
+        setLastSupabaseSyncError(null);
+        setRemoteSiteContentsInfo({ exists: res.exists, updatedAt: res.updatedAt });
+        if (res.updatedAt) {
+          setLastSupabasePublishAt(res.updatedAt);
+        }
+
+        // 3. Apply remote public payload ONLY for regular visitors (never overwrite active admin edits!)
+        const adminActive =
+          isAdminLoggedInRef.current ||
+          sessionAdminOk ||
+          (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('foodhome_admin_session') === 'true');
+
+        if (!adminActive && res.exists && res.payload) {
+          setState(prev =>
+            normalizeStateWithDefaults(prev, res.payload!, {
+              inquiries: prev.inquiries,
+              quotes: prev.quotes
+            })
+          );
+        }
       }
 
-      setLastSupabaseSyncError(null);
-      setRemoteSiteContentsInfo({ exists: res.exists, updatedAt: res.updatedAt });
-      if (res.updatedAt) {
-        setLastSupabasePublishAt(res.updatedAt);
-      }
-
-      // 3. Apply remote public payload ONLY for regular visitors (never overwrite active admin edits!)
-      const adminActive =
-        isAdminLoggedInRef.current ||
-        sessionAdminOk ||
-        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('foodhome_admin_session') === 'true');
-
-      if (!adminActive && res.exists && res.payload) {
-        setState(prev =>
-          normalizeStateWithDefaults(prev, res.payload!, {
-            inquiries: prev.inquiries,
-            quotes: prev.quotes
-          })
-        );
+      // 4. Synchronize remote boards (board_posts & board_private_inquiries) for all visitors & admins
+      if (!cancelled) {
+        await refreshBoardsFromSupabase(sessionAdminOk);
       }
     };
 
@@ -687,6 +993,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const user = session?.user;
         if (!user) {
+          isSupabaseAdminAuthedRef.current = false;
           setIsSupabaseAdminAuthed(false);
           setSupabaseAdminEmail(null);
           return;
@@ -699,8 +1006,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const ok = await isSiteAdmin(user.id);
         if (!cancelled) {
+          isSupabaseAdminAuthedRef.current = ok;
           setIsSupabaseAdminAuthed(ok);
           setSupabaseAdminEmail(ok ? (user.email || null) : null);
+          if (ok) {
+            refreshBoardsFromSupabase(true);
+          }
         }
       });
       subscription = data.subscription;
@@ -710,13 +1021,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cancelled = true;
       subscription?.unsubscribe();
     };
-  }, [supabaseConfig.url, supabaseConfig.anonKey]);
+  }, [supabaseConfig.url, supabaseConfig.anonKey, refreshBoardsFromSupabase]);
 
-  // Sync to localStorage (never delete/reset existing data on failure; alert user clearly if quota exceeded)
+  // Sync to localStorage (never clear/reset existing data on failure; warn cleanly if quota exceeded)
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        setLocalStorageQuotaError(null);
       }
     } catch (e: any) {
       console.error('Failed to save to localStorage:', e);
@@ -725,11 +1037,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         e?.name === 'NS_ERROR_DOM_QUOTA_REACHED' ||
         e?.code === 22;
       const errMsg = isQuota
-        ? '저장 공간(약 5MB)을 초과하여 마지막 변경사항이 브라우저에 저장되지 않았습니다. 이미지 크기를 줄이거나 불필요한 대용량 이미지를 정리해 주세요.'
+        ? '브라우저 저장 공간(약 5MB)을 초과했습니다. 관리자 > Supabase 연동 및 DB에서 내장 이미지를 Storage로 분리하면 즉시 해결됩니다.'
         : '브라우저 저장 중 오류가 발생하여 마지막 변경사항이 저장되지 않았습니다.';
+      setLocalStorageQuotaError(errMsg);
       setToastMessage(errMsg);
-      if (typeof window !== 'undefined') {
-        window.alert(errMsg);
+
+      // Safe fallback: if quota exceeded, preserve all content/products/posts & unsynced items by trimming synced cache only
+      if (isQuota && typeof window !== 'undefined' && window.localStorage) {
+        try {
+          const synced = loadSyncedBoardIds();
+          const syncedInqSet = new Set(synced.inquiries);
+          const syncedQuoteSet = new Set(synced.quotes);
+          const slimState: AppState = {
+            ...state,
+            inquiries: [
+              ...state.inquiries.filter(i => !syncedInqSet.has(i.id)),
+              ...state.inquiries.filter(i => syncedInqSet.has(i.id)).slice(0, 20)
+            ],
+            quotes: [
+              ...(state.quotes || []).filter(q => !syncedQuoteSet.has(q.id)),
+              ...(state.quotes || []).filter(q => syncedQuoteSet.has(q.id)).slice(0, 20)
+            ]
+          };
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(slimState));
+        } catch {
+          // Keep existing localStorage untouched
+        }
       }
     }
   }, [state]);
@@ -946,38 +1279,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('제품이 삭제되었습니다.');
   };
 
-  const addPost = (post: Omit<PostItem, 'id' | 'readCount' | 'date'>) => {
+  const addPost = async (
+    post: Omit<PostItem, 'id' | 'readCount' | 'date'>,
+    visitorPassword?: string
+  ): Promise<{ success: boolean; id?: string; syncedToDb?: boolean; error?: string }> => {
     const today = new Date().toISOString().split('T')[0];
+    const newId = `post-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const newPost: PostItem = {
       ...post,
-      id: 'post-' + Date.now(),
+      id: newId,
       date: today,
       readCount: 1
     };
+
     setState(prev => ({
       ...prev,
       posts: [newPost, ...prev.posts]
     }));
     setHasUnpublishedChanges(true);
+
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey) {
+      const dbRes = await createBoardPostInDb(newPost, visitorPassword);
+      if (dbRes.success) {
+        const synced = loadSyncedBoardIds();
+        if (!synced.posts.includes(newId)) {
+          synced.posts = [newId, ...synced.posts];
+          saveSyncedBoardIds(synced);
+        }
+        showToast(`새 게시글 "${newPost.title}"이 등록되어 DB에 즉시 저장되었습니다.`);
+        return { success: true, id: newId, syncedToDb: true };
+      }
+      showToast(`게시글이 등록되었습니다. (DB 동기화 안내: ${dbRes.error || '테이블 미설정'})`);
+      return { success: true, id: newId, syncedToDb: false, error: dbRes.error };
+    }
+
     showToast(`새로운 게시글 "${newPost.title}"이 등록되었습니다.`);
+    return { success: true, id: newId, syncedToDb: false };
   };
 
-  const updatePost = (id: string, postFields: Partial<PostItem>) => {
+  const updatePost = async (
+    id: string,
+    postFields: Partial<PostItem>,
+    visitorPassword?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey && (visitorPassword || isSupabaseAdminAuthedRef.current)) {
+      const dbRes = await updateBoardPostInDb(id, postFields, visitorPassword);
+      if (!dbRes.success) {
+        showToast(dbRes.error || '게시글 수정 권한이 없거나 DB 저장에 실패했습니다.');
+        return { success: false, error: dbRes.error };
+      }
+    }
+
     setState(prev => ({
       ...prev,
       posts: prev.posts.map(p => (p.id === id ? { ...p, ...postFields } : p))
     }));
     setHasUnpublishedChanges(true);
     showToast('게시글이 수정되었습니다.');
+    return { success: true };
   };
 
-  const deletePost = (id: string) => {
+  const deletePost = async (
+    id: string,
+    visitorPassword?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey && (visitorPassword || isSupabaseAdminAuthedRef.current)) {
+      const dbRes = await deleteBoardPostInDb(id, visitorPassword);
+      if (!dbRes.success) {
+        showToast(dbRes.error || '게시글 삭제 권한이 없거나 DB 삭제에 실패했습니다.');
+        return { success: false, error: dbRes.error };
+      }
+    }
+
     setState(prev => ({
       ...prev,
       posts: prev.posts.filter(p => p.id !== id)
     }));
+    const synced = loadSyncedBoardIds();
+    synced.posts = synced.posts.filter(pid => pid !== id);
+    saveSyncedBoardIds(synced);
     setHasUnpublishedChanges(true);
     showToast('게시글이 삭제되었습니다.');
+    return { success: true };
   };
 
   const incrementPostRead = (id: string) => {
@@ -985,6 +1371,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       posts: prev.posts.map(p => (p.id === id ? { ...p, readCount: p.readCount + 1 } : p))
     }));
+    incrementBoardPostReadInDb(id);
   };
 
   const addReview = (review: Omit<ReviewItem, 'id'>) => {
@@ -1175,9 +1562,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addInquiry = (inquiryData: Omit<B2BInquiry, 'id' | 'createdAt' | 'status'>) => {
     const now = new Date();
     const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const newId = `inq-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const nextPostNumber =
+      (state.inquiries.reduce((max, cur) => Math.max(max, cur.postNumber || 0), 0) || 46) + 1;
+
     const newInquiry: B2BInquiry = {
       ...inquiryData,
-      id: 'inq-' + Date.now(),
+      id: newId,
+      postNumber: inquiryData.postNumber || nextPostNumber,
+      writer: inquiryData.writer || maskKoreanName(inquiryData.contactPerson),
+      isSecret: inquiryData.isSecret ?? true,
+      readCount: inquiryData.readCount || 1,
       createdAt: formattedDate,
       status: '접수대기'
     };
@@ -1185,6 +1580,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       inquiries: [newInquiry, ...prev.inquiries]
     }));
+
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey) {
+      submitPrivateInquiryToBoard({
+        id: newId,
+        inquiryType: 'sample',
+        postNumber: newInquiry.postNumber || nextPostNumber,
+        title:
+          inquiryData.title ||
+          `[${inquiryData.companyName}] ${inquiryData.requestType || '무료 샘플 요청'}`,
+        companyName: inquiryData.companyName,
+        storeName: inquiryData.storeName || inquiryData.companyName,
+        contactPerson: inquiryData.contactPerson,
+        writerMasked: maskKoreanName(inquiryData.contactPerson),
+        phone: inquiryData.phone,
+        email: inquiryData.email,
+        region: inquiryData.region,
+        address: inquiryData.address,
+        businessType: inquiryData.businessType,
+        requestType: inquiryData.requestType || '무료 샘플 요청',
+        monthlyUsage: inquiryData.monthlyUsage,
+        selectedProducts: inquiryData.selectedProducts || [],
+        message: inquiryData.message,
+        password: inquiryData.password || inquiryData.phone || '0000'
+      }).then(res => {
+        if (res.success) {
+          const synced = loadSyncedBoardIds();
+          if (!synced.inquiries.includes(newId)) {
+            synced.inquiries = [newId, ...synced.inquiries];
+            saveSyncedBoardIds(synced);
+          }
+        }
+      });
+    }
+
     showToast('B2B 문의가 정상 접수되었습니다! 담당자가 빠르게 연락드립니다.');
   };
 
@@ -1202,6 +1632,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return inq;
       })
     }));
+
+    if (isSupabaseAdminAuthedRef.current) {
+      adminUpdatePrivateInquiryInBoard(id, { status, adminMemo }).then(res => {
+        if (!res.success && res.error) {
+          showToast(`DB 상태 동기화 실패: ${res.error}`);
+        }
+      });
+    }
     showToast('문의 처리 상태가 갱신되었습니다.');
   };
 
@@ -1210,6 +1648,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       inquiries: prev.inquiries.filter(inq => inq.id !== id)
     }));
+    const synced = loadSyncedBoardIds();
+    synced.inquiries = synced.inquiries.filter(iid => iid !== id);
+    saveSyncedBoardIds(synced);
+
+    if (isSupabaseAdminAuthedRef.current) {
+      adminDeletePrivateInquiryInBoard(id).then(res => {
+        if (!res.success && res.error) {
+          showToast(`DB 삭제 동기화 실패: ${res.error}`);
+        }
+      });
+    }
     showToast('문의 내역이 삭제되었습니다.');
   };
 
@@ -1387,12 +1836,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             return { success: false, error: '해당 계정은 관리자(site_admins) 권한이 승인되지 않았습니다.' };
           }
           isAdminLoggedInRef.current = true;
+          isSupabaseAdminAuthedRef.current = true;
           setIsAdminLoggedIn(true);
           setIsSupabaseAdminAuthed(true);
           setSupabaseAdminEmail(data.user.email || inputId);
           try {
             sessionStorage.setItem('foodhome_admin_session', 'true');
           } catch {}
+          refreshBoardsFromSupabase(true);
           showToast('Supabase 관리자 인증이 완료되었습니다.');
           return { success: true };
         }
@@ -1571,17 +2022,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     selectedProducts: string[];
     message: string;
     password: string;
-  }): Promise<{ success: boolean; id?: string }> => {
-    const newId = `inq-${Date.now()}`;
-    const nextPostNumber = (state.inquiries.reduce((max, cur) => Math.max(max, cur.postNumber || 0), 0) || 46) + 1;
-    
-    // Mask author name (e.g. 홍길동 -> 홍*동, 이진 -> 이*)
-    const name = post.contactPerson.trim();
-    const maskedAuthor = name.length > 2
-      ? name[0] + '*'.repeat(name.length - 2) + name[name.length - 1]
-      : name.length === 2
-      ? name[0] + '*'
-      : name;
+  }): Promise<{ success: boolean; id?: string; syncedToDb?: boolean; error?: string }> => {
+    const newId = `inq-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const nextPostNumber =
+      (state.inquiries.reduce((max, cur) => Math.max(max, cur.postNumber || 0), 0) || 46) + 1;
+    const maskedAuthor = maskKoreanName(post.contactPerson);
 
     const newInquiry: B2BInquiry = {
       id: newId,
@@ -1607,60 +2052,115 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString().slice(0, 10)
     };
 
-    // 1. Update local state
+    // 1. Update local state immediately
     setState(prev => ({
       ...prev,
       inquiries: [newInquiry, ...prev.inquiries]
     }));
 
-    // 2. If Supabase is connected, persist to form_submissions
-    const client = getSupabaseClient();
-    if (client) {
-      try {
-        await client.from('form_submissions').insert([
-          {
-            form_slug: 'sample-request',
-            title: post.title,
-            author_name: post.contactPerson,
-            store_name: post.storeName,
-            phone: post.phone,
-            address: post.address,
-            selected_items: post.selectedProducts,
-            password_hash: post.password,
-            status: '접수완료',
-            payload: {
-              message: post.message,
-              postNumber: nextPostNumber
+    // 2. Persist to dedicated Supabase `board_private_inquiries` + hashed legacy fallback
+    let syncedToDb = false;
+    let dbError: string | undefined;
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey) {
+      const boardRes = await submitPrivateInquiryToBoard({
+        id: newId,
+        inquiryType: 'sample',
+        postNumber: nextPostNumber,
+        title: post.title,
+        companyName: post.companyName || post.storeName,
+        storeName: post.storeName,
+        contactPerson: post.contactPerson,
+        writerMasked: maskedAuthor,
+        phone: post.phone,
+        region: post.address.slice(0, 10),
+        address: post.address,
+        businessType: '외식업체',
+        requestType: '무료 샘플 요청',
+        monthlyUsage: '미정',
+        selectedProducts: post.selectedProducts,
+        message: post.message,
+        password: post.password
+      });
+      syncedToDb = boardRes.success;
+      dbError = boardRes.error;
+
+      if (boardRes.success) {
+        const synced = loadSyncedBoardIds();
+        if (!synced.inquiries.includes(newId)) {
+          synced.inquiries = [newId, ...synced.inquiries];
+          saveSyncedBoardIds(synced);
+        }
+      }
+
+      // Preserve legacy form_submissions logging WITHOUT plaintext password
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const hashedPw = await hashPassword(post.password.trim());
+          await client.from('form_submissions').insert([
+            {
+              form_slug: 'sample-request',
+              title: post.title,
+              author_name: post.contactPerson,
+              store_name: post.storeName,
+              phone: post.phone,
+              address: post.address,
+              selected_items: post.selectedProducts,
+              password_hash: hashedPw,
+              status: '접수완료',
+              payload: {
+                message: post.message,
+                postNumber: nextPostNumber
+              }
             }
-          }
-        ]);
-      } catch (e) {
-        console.warn('Supabase submission background sync error:', e);
+          ]);
+        } catch (e) {
+          console.warn('Supabase submission background sync error:', e);
+        }
       }
     }
 
-    showToast('샘플 신청글이 성공적으로 등록되었습니다.');
-    return { success: true, id: newId };
+    showToast(
+      syncedToDb
+        ? '샘플 신청글이 등록되어 모든 기기에 실시간 저장되었습니다.'
+        : '샘플 신청글이 성공적으로 등록되었습니다.'
+    );
+    return { success: true, id: newId, syncedToDb, error: dbError };
   };
 
   const updateSamplePostReply = (id: string, reply: string, status?: B2BInquiry['status']) => {
+    const replyPayload = {
+      content: reply,
+      repliedAt: new Date().toISOString().slice(0, 10),
+      author: '푸드홈 관리자'
+    };
+    const nextStatus = status || '답변완료';
+
     setState(prev => ({
       ...prev,
       inquiries: prev.inquiries.map(inq => {
         if (inq.id === id) {
           return {
             ...inq,
-            status: status || '답변완료',
-            adminReply: {
-              content: reply,
-              repliedAt: new Date().toISOString().slice(0, 10),
-              author: '푸드홈 관리자'
-            }
+            status: nextStatus,
+            adminReply: replyPayload
           };
         }
         return inq;
       })
     }));
+
+    if (isSupabaseAdminAuthedRef.current) {
+      adminUpdatePrivateInquiryInBoard(id, {
+        status: nextStatus,
+        adminReply: replyPayload
+      }).then(res => {
+        if (!res.success && res.error) {
+          showToast(`DB 답변 저장 실패: ${res.error}`);
+        }
+      });
+    }
     showToast('답변이 등록되었습니다.');
   };
 
@@ -1668,8 +2168,103 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (isAdminLoggedIn) return true;
     const post = state.inquiries.find(i => i.id === postId);
     if (!post) return false;
-    if (!post.password) return true; // If no password was set, allow viewing
+    if (!post.password) return true;
     return post.password.trim() === passwordInput.trim();
+  };
+
+  const unlockSamplePost = async (
+    postId: string,
+    passwordInput: string
+  ): Promise<{ verified: boolean; post?: B2BInquiry; passwordHash?: string; error?: string }> => {
+    const target = state.inquiries.find(i => i.id === postId);
+    if (isAdminLoggedIn) {
+      return target ? { verified: true, post: target } : { verified: false, error: '게시글을 찾을 수 없습니다.' };
+    }
+
+    const trimmed = (passwordInput || '').trim();
+    if (!trimmed) {
+      return { verified: false, error: '비밀번호를 입력해 주세요.' };
+    }
+
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey) {
+      const remoteRes = await unlockPrivateInquiryFromBoard(postId, trimmed);
+      if (remoteRes.ok && remoteRes.sampleItem) {
+        setState(prev => ({
+          ...prev,
+          inquiries: prev.inquiries.map(i => (i.id === postId ? { ...i, ...remoteRes.sampleItem! } : i))
+        }));
+        return {
+          verified: true,
+          post: remoteRes.sampleItem,
+          passwordHash: remoteRes.passwordHash
+        };
+      }
+
+      // Fallback for unsynced local-only items still having plain post.password
+      if (target?.password && target.password.trim() === trimmed) {
+        const pwHash = await hashPassword(trimmed);
+        return { verified: true, post: target, passwordHash: pwHash };
+      }
+
+      return {
+        verified: false,
+        error: remoteRes.error || '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.'
+      };
+    }
+
+    if (!target) return { verified: false, error: '게시글을 찾을 수 없습니다.' };
+    if (!target.password || target.password.trim() === trimmed) {
+      const pwHash = await hashPassword(trimmed);
+      return { verified: true, post: target, passwordHash: pwHash };
+    }
+    return { verified: false, error: '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.' };
+  };
+
+  const updateSamplePostByVisitor = async (
+    id: string,
+    passwordHash: string,
+    title: string,
+    message: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cfg = getSavedSupabaseConfig();
+    const synced = loadSyncedBoardIds();
+    if (cfg.url && cfg.anonKey && synced.inquiries.includes(id)) {
+      const res = await updatePrivateInquiryByAuthorInBoard(id, passwordHash, title, message);
+      if (!res.success) {
+        return { success: false, error: res.error || '수정에 실패했습니다.' };
+      }
+    }
+
+    setState(prev => ({
+      ...prev,
+      inquiries: prev.inquiries.map(inq => (inq.id === id ? { ...inq, title, message } : inq))
+    }));
+    showToast('신청글 내용이 수정되었습니다.');
+    return { success: true };
+  };
+
+  const deleteSamplePostByVisitor = async (
+    id: string,
+    passwordHash: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cfg = getSavedSupabaseConfig();
+    const synced = loadSyncedBoardIds();
+    if (cfg.url && cfg.anonKey && synced.inquiries.includes(id)) {
+      const res = await deletePrivateInquiryByAuthorInBoard(id, passwordHash);
+      if (!res.success) {
+        return { success: false, error: res.error || '삭제에 실패했습니다.' };
+      }
+      synced.inquiries = synced.inquiries.filter(iid => iid !== id);
+      saveSyncedBoardIds(synced);
+    }
+
+    setState(prev => ({
+      ...prev,
+      inquiries: prev.inquiries.filter(inq => inq.id !== id)
+    }));
+    showToast('신청글이 삭제되었습니다.');
+    return { success: true };
   };
 
   // Main Banners Manager
@@ -1713,13 +2308,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     message: string;
     attachments?: { name: string; url?: string; size?: string }[];
     password: string;
-  }): Promise<{ success: boolean; id?: string }> => {
-    const newId = `quote-${Date.now()}`;
-    const nextPostNumber = (state.quotes && state.quotes.length > 0)
-      ? Math.max(...state.quotes.map(q => q.postNumber || 0)) + 1
-      : 1;
+  }): Promise<{ success: boolean; id?: string; syncedToDb?: boolean; error?: string }> => {
+    const newId = `quote-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const nextPostNumber =
+      state.quotes && state.quotes.length > 0
+        ? Math.max(...state.quotes.map(q => q.postNumber || 0)) + 1
+        : 1;
 
-    const passwordHash = await hashPassword(quote.password);
+    const passwordHash = await hashPassword(quote.password.trim());
 
     const newQuote: QuoteInquiry = {
       id: newId,
@@ -1749,36 +2345,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       quotes: [newQuote, ...(prev.quotes || [])]
     }));
 
-    // If Supabase is connected, attempt sync to database
-    const client = getSupabaseClient();
-    if (client) {
-      try {
-        await client.from('quote_inquiries').insert([
-          {
-            title: quote.title,
-            company_name: quote.companyName,
-            contact_person: quote.contactPerson,
-            phone: quote.phone,
-            email: quote.email,
-            region: quote.region,
-            business_type: quote.businessType,
-            interested_products: quote.interestedProducts,
-            monthly_volume: quote.monthlyVolume,
-            delivery_schedule: quote.deliverySchedule,
-            message: quote.message,
-            attachments: quote.attachments || [],
-            password_hash: passwordHash,
-            status: '접수완료',
-            is_secret: true
-          }
-        ]);
-      } catch (err) {
-        console.warn('Supabase quote submission background sync:', err);
+    let syncedToDb = false;
+    let dbError: string | undefined;
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey) {
+      const boardRes = await submitPrivateInquiryToBoard({
+        id: newId,
+        inquiryType: 'quote',
+        postNumber: nextPostNumber,
+        title: quote.title,
+        companyName: quote.companyName,
+        storeName: quote.companyName,
+        contactPerson: quote.contactPerson,
+        writerMasked: maskKoreanName(quote.contactPerson),
+        phone: quote.phone,
+        email: quote.email,
+        region: quote.region,
+        businessType: quote.businessType,
+        requestType: '대량 납품 견적',
+        monthlyUsage: quote.monthlyVolume,
+        deliverySchedule: quote.deliverySchedule,
+        selectedProducts: quote.interestedProducts,
+        attachments: quote.attachments || [],
+        message: quote.message,
+        password: quote.password
+      });
+      syncedToDb = boardRes.success;
+      dbError = boardRes.error;
+      if (boardRes.success) {
+        const synced = loadSyncedBoardIds();
+        if (!synced.quotes.includes(newId)) {
+          synced.quotes = [newId, ...synced.quotes];
+          saveSyncedBoardIds(synced);
+        }
       }
     }
 
-    showToast('대량 납품 견적 상담이 성공적으로 접수되었습니다.');
-    return { success: true, id: newId };
+    showToast(
+      syncedToDb
+        ? '대량 납품 견적 상담이 등록되어 DB에 안전하게 저장되었습니다.'
+        : '대량 납품 견적 상담이 성공적으로 접수되었습니다.'
+    );
+    return { success: true, id: newId, syncedToDb, error: dbError };
   };
 
   const updateQuoteStatus = (id: string, status: string, adminMemo?: string) => {
@@ -1795,27 +2403,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return q;
       })
     }));
+    if (isSupabaseAdminAuthedRef.current) {
+      adminUpdatePrivateInquiryInBoard(id, { status, adminMemo }).then(res => {
+        if (!res.success && res.error) {
+          showToast(`DB 견적 상태 저장 실패: ${res.error}`);
+        }
+      });
+    }
     showToast(`견적 상담 상태가 '${status}'(으)로 변경되었습니다.`);
   };
 
   const updateQuoteReply = (id: string, reply: string, status?: string) => {
+    const existing = (state.quotes || []).find(q => q.id === id);
+    const nextStatus = status || existing?.status || '상담중';
+    const replyPayload = {
+      content: reply,
+      repliedAt: new Date().toISOString().slice(0, 10),
+      author: '푸드홈 관리자'
+    };
+
     setState(prev => ({
       ...prev,
       quotes: (prev.quotes || []).map(q => {
         if (q.id === id) {
           return {
             ...q,
-            status: status || q.status || '상담중',
-            adminReply: {
-              content: reply,
-              repliedAt: new Date().toISOString().slice(0, 10),
-              author: '푸드홈 관리자'
-            }
+            status: nextStatus,
+            adminReply: replyPayload
           };
         }
         return q;
       })
     }));
+    if (isSupabaseAdminAuthedRef.current) {
+      adminUpdatePrivateInquiryInBoard(id, {
+        status: nextStatus,
+        adminReply: replyPayload
+      }).then(res => {
+        if (!res.success && res.error) {
+          showToast(`DB 견적 답변 저장 실패: ${res.error}`);
+        }
+      });
+    }
     showToast('관리자 답변이 등록되었습니다.');
   };
 
@@ -1824,6 +2453,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       quotes: (prev.quotes || []).filter(q => q.id !== id)
     }));
+    const synced = loadSyncedBoardIds();
+    synced.quotes = synced.quotes.filter(qid => qid !== id);
+    saveSyncedBoardIds(synced);
+
+    if (isSupabaseAdminAuthedRef.current) {
+      adminDeletePrivateInquiryInBoard(id).then(res => {
+        if (!res.success && res.error) {
+          showToast(`DB 견적 삭제 실패: ${res.error}`);
+        }
+      });
+    }
     showToast('견적 상담글이 삭제되었습니다.');
   };
 
@@ -1832,6 +2472,181 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = (state.quotes || []).find(q => q.id === quoteId);
     if (!target) return false;
     return verifyQuotePasswordWithHash(passwordInput, target.passwordHash, target.rawPasswordHint);
+  };
+
+  const unlockQuotePost = async (
+    quoteId: string,
+    passwordInput: string
+  ): Promise<{ verified: boolean; quote?: QuoteInquiry; passwordHash?: string; error?: string }> => {
+    const target = (state.quotes || []).find(q => q.id === quoteId);
+    if (isAdminLoggedIn) {
+      return target ? { verified: true, quote: target } : { verified: false, error: '게시글을 찾을 수 없습니다.' };
+    }
+
+    const trimmed = (passwordInput || '').trim();
+    if (!trimmed) {
+      return { verified: false, error: '비밀번호를 입력해 주세요.' };
+    }
+
+    const cfg = getSavedSupabaseConfig();
+    if (cfg.url && cfg.anonKey) {
+      const remoteRes = await unlockPrivateInquiryFromBoard(quoteId, trimmed);
+      if (remoteRes.ok && remoteRes.quoteItem) {
+        setState(prev => ({
+          ...prev,
+          quotes: (prev.quotes || []).map(q => (q.id === quoteId ? { ...q, ...remoteRes.quoteItem! } : q))
+        }));
+        return {
+          verified: true,
+          quote: remoteRes.quoteItem,
+          passwordHash: remoteRes.passwordHash
+        };
+      }
+
+      if (target) {
+        const localOk = await verifyQuotePasswordWithHash(trimmed, target.passwordHash, target.rawPasswordHint);
+        if (localOk) {
+          const pwHash = target.passwordHash || (await hashPassword(trimmed));
+          return { verified: true, quote: target, passwordHash: pwHash };
+        }
+      }
+
+      return {
+        verified: false,
+        error: remoteRes.error || '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.'
+      };
+    }
+
+    if (!target) return { verified: false, error: '게시글을 찾을 수 없습니다.' };
+    const localOk = await verifyQuotePasswordWithHash(trimmed, target.passwordHash, target.rawPasswordHint);
+    if (!localOk) {
+      return { verified: false, error: '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.' };
+    }
+    const pwHash = target.passwordHash || (await hashPassword(trimmed));
+    return { verified: true, quote: target, passwordHash: pwHash };
+  };
+
+  const updateQuoteByVisitor = async (
+    id: string,
+    passwordHash: string,
+    title: string,
+    message: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cfg = getSavedSupabaseConfig();
+    const synced = loadSyncedBoardIds();
+    if (cfg.url && cfg.anonKey && synced.quotes.includes(id)) {
+      const res = await updatePrivateInquiryByAuthorInBoard(id, passwordHash, title, message);
+      if (!res.success) {
+        return { success: false, error: res.error || '수정에 실패했습니다.' };
+      }
+    }
+
+    setState(prev => ({
+      ...prev,
+      quotes: (prev.quotes || []).map(q => (q.id === id ? { ...q, title, message } : q))
+    }));
+    showToast('견적 상담글 내용이 수정되었습니다.');
+    return { success: true };
+  };
+
+  const deleteQuoteByVisitor = async (
+    id: string,
+    passwordHash: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cfg = getSavedSupabaseConfig();
+    const synced = loadSyncedBoardIds();
+    if (cfg.url && cfg.anonKey && synced.quotes.includes(id)) {
+      const res = await deletePrivateInquiryByAuthorInBoard(id, passwordHash);
+      if (!res.success) {
+        return { success: false, error: res.error || '삭제에 실패했습니다.' };
+      }
+      synced.quotes = synced.quotes.filter(qid => qid !== id);
+      saveSyncedBoardIds(synced);
+    }
+
+    setState(prev => ({
+      ...prev,
+      quotes: (prev.quotes || []).filter(q => q.id !== id)
+    }));
+    showToast('견적 상담글이 삭제되었습니다.');
+    return { success: true };
+  };
+
+  const migrateLocalBoardsToSupabase = async (): Promise<{
+    success: boolean;
+    postsCount: number;
+    inquiriesCount: number;
+    error?: string;
+  }> => {
+    if (!isSupabaseAdminAuthedRef.current) {
+      return {
+        success: false,
+        postsCount: 0,
+        inquiriesCount: 0,
+        error: 'Supabase 관리자 이메일 계정으로 로그인한 상태에서만 일괄 이전할 수 있습니다.'
+      };
+    }
+
+    const postsRes = await migrateLocalPostsToBoardTable(state.posts || []);
+    if (!postsRes.success) {
+      return {
+        success: false,
+        postsCount: 0,
+        inquiriesCount: 0,
+        error: postsRes.error
+      };
+    }
+
+    const privRes = await migrateLocalInquiriesAndQuotesToBoard(state.inquiries || [], state.quotes || []);
+    if (!privRes.success) {
+      return {
+        success: false,
+        postsCount: postsRes.count,
+        inquiriesCount: 0,
+        error: privRes.error
+      };
+    }
+
+    const prevSynced = loadSyncedBoardIds();
+    saveSyncedBoardIds({
+      posts: Array.from(new Set([...prevSynced.posts, ...(state.posts || []).map(p => p.id)])),
+      inquiries: Array.from(new Set([...prevSynced.inquiries, ...(state.inquiries || []).map(i => i.id)])),
+      quotes: Array.from(new Set([...prevSynced.quotes, ...(state.quotes || []).map(q => q.id)]))
+    });
+
+    await refreshBoardsFromSupabase(true);
+    showToast(`게시글 ${postsRes.count}건 및 샘플·견적 문의 ${privRes.count}건을 Supabase로 이전했습니다.`);
+    return {
+      success: true,
+      postsCount: postsRes.count,
+      inquiriesCount: privRes.count
+    };
+  };
+
+  const migrateEmbeddedImagesToStorage = async (): Promise<{
+    success: boolean;
+    migratedCount: number;
+    failedCount: number;
+    error?: string;
+  }> => {
+    const res = await migrateDataUrlsInStateToStorage(state);
+    if (res.migratedCount > 0) {
+      setState(res.nextState);
+      setHasUnpublishedChanges(true);
+      showToast(
+        `${res.migratedCount}개의 내장 이미지를 Supabase Storage로 분리했습니다. 이제 Supabase 게시에 반영해 주세요.`
+      );
+    } else if (res.error) {
+      showToast(res.error);
+    } else {
+      showToast('분리할 대용량 내장 이미지(Base64)가 없습니다.');
+    }
+    return {
+      success: res.success,
+      migratedCount: res.migratedCount,
+      failedCount: res.failedCount,
+      error: res.error
+    };
   };
 
   return (
@@ -1887,6 +2702,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         handleAdminLogout,
         supabaseConfig,
         updateSupabaseConfig,
+        isBoardSyncing,
+        boardSyncInfo,
+        localStorageStats,
+        localStorageQuotaError,
+        refreshBoardsFromSupabase,
+        migrateLocalBoardsToSupabase,
+        migrateEmbeddedImagesToStorage,
         isPasswordRecoveryMode,
         isCheckingRecoverySession,
         hasValidRecoverySession,
@@ -1905,11 +2727,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addSamplePost,
         updateSamplePostReply,
         verifyPostPassword,
+        unlockSamplePost,
+        updateSamplePostByVisitor,
+        deleteSamplePostByVisitor,
         addQuoteInquiry,
         updateQuoteStatus,
         updateQuoteReply,
         deleteQuoteInquiry,
         verifyQuotePassword,
+        unlockQuotePost,
+        updateQuoteByVisitor,
+        deleteQuoteByVisitor,
         updateBanners,
         updateFormConfig,
         addFaqItem,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { PostItem } from '../../types';
 import { 
@@ -15,11 +15,29 @@ import {
   ExternalLink,
   Sparkles,
   CheckCircle2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react';
 
 export const NoticeManager: React.FC = () => {
-  const { state, addPost, updatePost, deletePost, setSelectedPostForDetail, showToast } = useApp();
+  const {
+    state,
+    addPost,
+    updatePost,
+    deletePost,
+    setSelectedPostForDetail,
+    showToast,
+    isBoardSyncing,
+    isSupabaseAdminAuthed,
+    supabaseConfig,
+    refreshBoardsFromSupabase,
+    setActiveAdminTab
+  } = useApp();
+
+  useEffect(() => {
+    refreshBoardsFromSupabase(isSupabaseAdminAuthed);
+  }, [refreshBoardsFromSupabase, isSupabaseAdminAuthed]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -75,18 +93,17 @@ export const NoticeManager: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleTogglePin = (post: PostItem) => {
-    updatePost(post.id, { isPinned: !post.isPinned });
-    showToast(post.isPinned ? '상단 고정이 해제되었습니다.' : '중요 공지로 상단 고정되었습니다.');
+  const handleTogglePin = async (post: PostItem) => {
+    await updatePost(post.id, { isPinned: !post.isPinned });
   };
 
-  const handleDelete = (id: string, title: string) => {
+  const handleDelete = async (id: string, title: string) => {
     if (confirm(`'${title}' 공지사항을 삭제하시겠습니까?`)) {
-      deletePost(id);
+      await deletePost(id);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.title.trim() || !form.content.trim()) {
       showToast('제목과 본문을 입력해 주세요.');
@@ -99,7 +116,7 @@ export const NoticeManager: React.FC = () => {
       .filter(Boolean);
 
     if (editingPostId) {
-      updatePost(editingPostId, {
+      const res = await updatePost(editingPostId, {
         title: form.title,
         author: form.author,
         content: form.content,
@@ -107,9 +124,9 @@ export const NoticeManager: React.FC = () => {
         tags: tagArray,
         isPinned: form.isPinned
       });
-      showToast('공지사항이 수정되었습니다.');
+      if (!res.success) return;
     } else {
-      addPost({
+      const res = await addPost({
         title: form.title,
         category: '공지사항',
         author: form.author,
@@ -118,7 +135,7 @@ export const NoticeManager: React.FC = () => {
         tags: tagArray,
         isPinned: form.isPinned
       });
-      showToast('새 공지사항이 등록되었습니다.');
+      if (!res.success) return;
     }
     setIsModalOpen(false);
   };
@@ -144,14 +161,43 @@ export const NoticeManager: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="px-4 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#6E1D24] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          <span>새 공지사항 작성</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => refreshBoardsFromSupabase(isSupabaseAdminAuthed)}
+            disabled={isBoardSyncing}
+            className="px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-60"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isBoardSyncing ? 'animate-spin' : ''}`} />
+            <span>DB 새로고침</span>
+          </button>
+          <button
+            onClick={handleOpenAdd}
+            className="px-4 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#6E1D24] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            <span>새 공지사항 작성</span>
+          </button>
+        </div>
       </div>
+
+      {!isSupabaseAdminAuthed && supabaseConfig.url && supabaseConfig.anonKey && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              현재 로컬 관리자 세션으로 접속 중입니다. 공지 수정·삭제가 Supabase DB에 즉시 반영되려면 이메일 관리자 인증이 필요합니다.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveAdminTab('supabase')}
+            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+          >
+            Supabase 인증하기
+          </button>
+        </div>
+      )}
 
       {/* Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-2xs">

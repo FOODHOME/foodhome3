@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { B2BInquiry } from '../types';
 import { 
@@ -21,7 +21,10 @@ import {
   MapPin, 
   Sparkles,
   Send,
-  X
+  X,
+  Edit3,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 interface SampleBoardPageProps {
@@ -33,13 +36,20 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
     state, 
     addSamplePost, 
     updateSamplePostReply, 
-    updateInquiryStatus, 
     deleteInquiry,
     isAdminLoggedIn, 
-    verifyPostPassword, 
+    unlockSamplePost,
+    updateSamplePostByVisitor,
+    deleteSamplePostByVisitor,
+    refreshBoardsFromSupabase,
+    isBoardSyncing,
     showToast,
     setActivePage
   } = useApp();
+
+  useEffect(() => {
+    refreshBoardsFromSupabase();
+  }, [refreshBoardsFromSupabase]);
 
   const [viewMode, setViewMode] = useState<'list' | 'write' | 'detail'>(initialViewMode);
   const [selectedPost, setSelectedPost] = useState<B2BInquiry | null>(null);
@@ -49,6 +59,14 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
   const [postToUnlock, setPostToUnlock] = useState<B2BInquiry | null>(null);
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isVerifyingUnlock, setIsVerifyingUnlock] = useState(false);
+  const [unlockedPasswordHash, setUnlockedPasswordHash] = useState<string | null>(null);
+
+  // Visitor Edit State
+  const [isEditingPost, setIsEditingPost] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editMessage, setEditMessage] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -102,6 +120,9 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
   };
 
   const handleRowClick = (post: B2BInquiry) => {
+    setIsEditingPost(false);
+    setUnlockedPasswordHash(null);
+
     if (isAdminLoggedIn) {
       setSelectedPost(post);
       setViewMode('detail');
@@ -115,7 +136,7 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
     setPasswordModalOpen(true);
   };
 
-  const handleUnlockSubmit = (e: React.FormEvent) => {
+  const handleUnlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!postToUnlock) return;
 
@@ -124,31 +145,82 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
       return;
     }
 
-    const isValid = verifyPostPassword(postToUnlock.id, enteredPassword);
-    if (isValid) {
+    setIsVerifyingUnlock(true);
+    const res = await unlockSamplePost(postToUnlock.id, enteredPassword);
+    setIsVerifyingUnlock(false);
+
+    if (res.verified && res.post) {
       setPasswordModalOpen(false);
-      setSelectedPost(postToUnlock);
+      setUnlockedPasswordHash(res.passwordHash || null);
+      setSelectedPost(res.post);
       setViewMode('detail');
       setPasswordError(null);
     } else {
-      setPasswordError('비밀번호가 일치하지 않습니다. 다시 확인해 주세요.');
+      setPasswordError(res.error || '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.');
+    }
+  };
+
+  const handleSaveEditPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPost || !unlockedPasswordHash) return;
+    if (!editTitle.trim()) {
+      showToast('제목을 입력해 주세요.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    const res = await updateSamplePostByVisitor(
+      selectedPost.id,
+      unlockedPasswordHash,
+      editTitle.trim(),
+      editMessage.trim()
+    );
+    setIsSavingEdit(false);
+
+    if (res.success) {
+      setSelectedPost(prev => (prev ? { ...prev, title: editTitle.trim(), message: editMessage.trim() } : null));
+      setIsEditingPost(false);
+    } else {
+      showToast(res.error || '수정에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteCurrentPost = async () => {
+    if (!selectedPost) return;
+    if (!window.confirm('이 샘플 신청글을 삭제하시겠습니까?')) return;
+
+    if (isAdminLoggedIn && !unlockedPasswordHash) {
+      deleteInquiry(selectedPost.id);
+      setSelectedPost(null);
+      setViewMode('list');
+      return;
+    }
+
+    if (!unlockedPasswordHash) return;
+    const res = await deleteSamplePostByVisitor(selectedPost.id, unlockedPasswordHash);
+    if (res.success) {
+      setSelectedPost(null);
+      setUnlockedPasswordHash(null);
+      setViewMode('list');
+    } else {
+      showToast(res.error || '삭제 권한이 없습니다.');
     }
   };
 
   const handleWriteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.storeName.trim() || !formData.contactPerson.trim() || !formData.phone.trim() || !formData.address.trim()) {
-      alert('상호명, 담당자명, 연락처, 배송지 주소는 필수 입력 사항입니다.');
+      showToast('상호명, 담당자명, 연락처, 배송지 주소는 필수 입력 사항입니다.');
       return;
     }
 
     if (!formData.password || formData.password.length < 4) {
-      alert('게시글 조회를 위한 비밀번호 4자리 이상을 입력해 주세요.');
+      showToast('게시글 조회를 위한 비밀번호 4자리 이상을 입력해 주세요.');
       return;
     }
 
     if (!formData.agreedPrivacy) {
-      alert('개인정보 수집 및 이용에 동의해 주셔야 신청이 완료됩니다.');
+      showToast('개인정보 수집 및 이용에 동의해 주셔야 신청이 완료됩니다.');
       return;
     }
 
@@ -370,15 +442,26 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
                 ))}
               </div>
 
-              <div className="relative w-full md:w-72">
-                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="제목, 작성자, 상호명 검색..."
-                  className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-stone-200 text-xs focus:outline-none focus:border-[#872D35] bg-stone-50"
-                />
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="relative flex-1 md:w-72">
+                  <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="제목, 작성자, 상호명 검색..."
+                    className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-stone-200 text-xs focus:outline-none focus:border-[#872D35] bg-stone-50"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refreshBoardsFromSupabase()}
+                  disabled={isBoardSyncing}
+                  className="p-2 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-600 cursor-pointer disabled:opacity-50"
+                  title="최신 게시글 새로고침"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isBoardSyncing ? 'animate-spin' : ''}`} />
+                </button>
               </div>
             </div>
 
@@ -745,13 +828,80 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
                 )}
               </div>
 
-              {/* Message Content */}
-              <div>
-                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">상세 요청사항</h4>
-                <div className="p-4 rounded-2xl bg-white border border-stone-200 text-xs sm:text-sm text-stone-800 leading-relaxed whitespace-pre-wrap">
-                  {selectedPost.message || '상세 요청사항이 등록되지 않았습니다.'}
+              {/* Message Content & Author Actions */}
+              {isEditingPost ? (
+                <form onSubmit={handleSaveEditPost} className="space-y-3 bg-stone-50 p-4 rounded-2xl border border-stone-200">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1">제목 수정</label>
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs sm:text-sm bg-white focus:outline-none focus:border-[#872D35]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1">상세 요청사항 수정</label>
+                    <textarea
+                      rows={4}
+                      value={editMessage}
+                      onChange={(e) => setEditMessage(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs sm:text-sm bg-white focus:outline-none focus:border-[#872D35]"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingPost(false)}
+                      className="px-3.5 py-1.5 rounded-lg border border-stone-300 bg-white text-xs font-bold text-stone-700 cursor-pointer"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingEdit}
+                      className="px-4 py-1.5 rounded-lg bg-[#872D35] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingEdit ? '저장 중...' : '수정 저장'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider">상세 요청사항</h4>
+                    {(unlockedPasswordHash || isAdminLoggedIn) && (
+                      <div className="flex items-center gap-1.5">
+                        {unlockedPasswordHash && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditTitle(selectedPost.title || '');
+                              setEditMessage(selectedPost.message || '');
+                              setIsEditingPost(true);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>수정</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleDeleteCurrentPost}
+                          className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>삭제</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 rounded-2xl bg-white border border-stone-200 text-xs sm:text-sm text-stone-800 leading-relaxed whitespace-pre-wrap">
+                    {selectedPost.message || '상세 요청사항이 등록되지 않았습니다.'}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Administrator's Official Reply */}
               {selectedPost.adminReply ? (
@@ -888,9 +1038,10 @@ export const SampleBoardPage: React.FC<SampleBoardPageProps> = ({ initialViewMod
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#9E2A2B] text-white text-xs font-black shadow-sm cursor-pointer"
+                  disabled={isVerifyingUnlock}
+                  className="flex-1 py-2.5 rounded-xl bg-[#872D35] hover:bg-[#9E2A2B] text-white text-xs font-black shadow-sm cursor-pointer disabled:opacity-50"
                 >
-                  확인하기
+                  {isVerifyingUnlock ? '확인 중...' : '확인하기'}
                 </button>
               </div>
             </form>

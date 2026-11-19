@@ -7,6 +7,7 @@ import {
 } from '../../../types';
 import { SelectedElement } from './types';
 import { uploadImageToStorage } from '../../../lib/supabase';
+import { useApp } from '../../../context/AppContext';
 import { 
   X, 
   Sparkles, 
@@ -80,9 +81,10 @@ export const VisualInspectorPanel: React.FC<VisualInspectorPanelProps> = ({
   content,
   onUpdateContent
 }) => {
+  const { showToast } = useApp();
   const [isUploading, setIsUploading] = useState(false);
 
-  // Helper for uploading image file
+  // Helper for uploading image file (Supabase Storage first, optimized fallback on error)
   const handleFileUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     onSuccess: (url: string) => void
@@ -92,25 +94,21 @@ export const VisualInspectorPanel: React.FC<VisualInspectorPanelProps> = ({
 
     setIsUploading(true);
     try {
-      // 1. Try remote Supabase Storage upload
-      const res = await uploadImageToStorage(file, 'foodhome-media');
+      const folder = product ? 'products' : 'sections';
+      const res = await uploadImageToStorage(file, folder);
       if (res?.url) {
         onSuccess(res.url);
-        setIsUploading(false);
-        return;
+        if (res.warning) {
+          showToast(res.warning);
+        }
+      } else if (res?.error) {
+        showToast(res.error);
       }
     } catch {
-      //
-    }
-
-    // 2. Client-side Base64 reader fallback
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      onSuccess(base64);
+      showToast('이미지 업로드 중 오류가 발생했습니다.');
+    } finally {
       setIsUploading(false);
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   // If nothing is selected, show friendly guide

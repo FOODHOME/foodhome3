@@ -67,7 +67,9 @@ import {
   Settings,
   ChevronLeft,
   Menu as MenuIcon,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -100,12 +102,14 @@ export const AdminDashboard: React.FC = () => {
     supabaseAdminEmail,
     isPublishingToSupabase,
     isSyncingFromSupabase,
+    isBoardSyncing,
     hasUnpublishedChanges,
     lastSupabasePublishAt,
     lastSupabaseSyncError,
     remoteSiteContentsInfo,
     publishPublicContentsToSupabase,
     pullPublicContentsFromSupabase,
+    refreshBoardsFromSupabase,
     handleAdminLogout
   } = useApp();
 
@@ -183,6 +187,12 @@ export const AdminDashboard: React.FC = () => {
       setFormspreeEndpointInput(state.formspreeEndpoint);
     }
   }, [state.formspreeEndpoint]);
+
+  useEffect(() => {
+    if (isAdminOpen) {
+      refreshBoardsFromSupabase(isSupabaseAdminAuthed);
+    }
+  }, [isAdminOpen, isSupabaseAdminAuthed, refreshBoardsFromSupabase]);
 
   // Product modal / editing
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -2138,8 +2148,17 @@ export const AdminDashboard: React.FC = () => {
                   <p className="text-xs text-slate-500">외식업 사장님들의 접수 내역을 확인하고 처리 상태와 내부 메모를 관리합니다.</p>
                 </div>
 
-                {/* Filter Pills */}
-                <div className="flex items-center gap-1.5">
+                {/* Filter Pills & DB Refresh */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => refreshBoardsFromSupabase(isSupabaseAdminAuthed)}
+                    disabled={isBoardSyncing}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isBoardSyncing ? 'animate-spin' : ''}`} />
+                    <span>DB 새로고침</span>
+                  </button>
                   {(['전체', '접수대기', '샘플발송완료', '상담완료'] as const).map(flt => (
                     <button
                       key={flt}
@@ -2155,6 +2174,24 @@ export const AdminDashboard: React.FC = () => {
                   ))}
                 </div>
               </div>
+
+              {!isSupabaseAdminAuthed && supabaseConfig.url && supabaseConfig.anonKey && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      다른 브라우저에서 방문자가 신청한 전체 연락처·배송지 조회 및 상태/메모 DB 저장을 위해 이메일 관리자 인증이 필요합니다.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAdminTab('supabase')}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+                  >
+                    Supabase 인증하기
+                  </button>
+                </div>
+              )}
 
               {/* Formspree Endpoint Configuration Card */}
               <div className="bg-gradient-to-r from-blue-900 to-slate-900 rounded-xl p-5 text-white shadow-md space-y-4">

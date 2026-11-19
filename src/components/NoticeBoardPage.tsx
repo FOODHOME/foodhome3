@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { PostItem } from '../types';
 import { 
@@ -14,7 +14,8 @@ import {
   Sparkles,
   ArrowRight,
   ShieldAlert,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 
 export const NoticeBoardPage: React.FC = () => {
@@ -24,12 +25,18 @@ export const NoticeBoardPage: React.FC = () => {
     setSelectedPostForDetail, 
     incrementPostRead,
     setIsAdminOpen,
-    isAdminLoggedIn
+    isAdminLoggedIn,
+    refreshBoardsFromSupabase,
+    isBoardSyncing
   } = useApp();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
+
+  useEffect(() => {
+    refreshBoardsFromSupabase();
+  }, [refreshBoardsFromSupabase]);
 
   // Filter only notices (공지사항)
   const noticePosts = useMemo(() => {
@@ -139,26 +146,37 @@ export const NoticeBoardPage: React.FC = () => {
             </h2>
           </div>
 
-          <div className="relative w-full sm:w-80">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              placeholder="공지 제목 또는 내용 검색..."
-              className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm rounded-xl border border-stone-300 focus:outline-none focus:border-[#872D35] focus:ring-1 focus:ring-[#872D35] bg-stone-50/50"
-            />
-            <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-stone-400 hover:text-stone-600"
-              >
-                초기화
-              </button>
-            )}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-80">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
+                placeholder="공지 제목 또는 내용 검색..."
+                className="w-full pl-9 pr-4 py-2 text-xs sm:text-sm rounded-xl border border-stone-300 focus:outline-none focus:border-[#872D35] focus:ring-1 focus:ring-[#872D35] bg-stone-50/50"
+              />
+              <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-stone-400 hover:text-stone-600"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => refreshBoardsFromSupabase()}
+              disabled={isBoardSyncing}
+              title="최신 공지사항 새로고침"
+              className="p-2.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-600 cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <RefreshCw className={`w-4 h-4 ${isBoardSyncing ? 'animate-spin' : ''}`} />
+            </button>
           </div>
         </div>
 

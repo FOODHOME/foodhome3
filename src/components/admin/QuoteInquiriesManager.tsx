@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { QuoteInquiry } from '../../types';
 import { 
@@ -12,6 +12,8 @@ import {
   ShieldCheck, 
   Eye, 
   AlertCircle,
+  AlertTriangle,
+  RefreshCw,
   Building,
   User,
   Phone,
@@ -28,8 +30,17 @@ export const QuoteInquiriesManager: React.FC = () => {
     updateQuoteStatus, 
     updateQuoteReply, 
     deleteQuoteInquiry,
-    showToast 
+    showToast,
+    isBoardSyncing,
+    isSupabaseAdminAuthed,
+    supabaseConfig,
+    refreshBoardsFromSupabase,
+    setActiveAdminTab
   } = useApp();
+
+  useEffect(() => {
+    refreshBoardsFromSupabase(isSupabaseAdminAuthed);
+  }, [refreshBoardsFromSupabase, isSupabaseAdminAuthed]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('전체');
@@ -117,12 +128,39 @@ export const QuoteInquiriesManager: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => refreshBoardsFromSupabase(isSupabaseAdminAuthed)}
+            disabled={isBoardSyncing}
+            className="px-3 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isBoardSyncing ? 'animate-spin' : ''}`} />
+            <span>DB 새로고침</span>
+          </button>
           <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-stone-100 text-stone-700">
             총 {quotes.length}건 접수됨
           </span>
         </div>
       </div>
+
+      {!isSupabaseAdminAuthed && supabaseConfig.url && supabaseConfig.anonKey && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-900">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              방문자가 작성한 견적 상담의 전체 연락처·상세 내용 열람 및 답변 DB 저장을 위해 이메일 관리자 인증이 필요합니다.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveAdminTab('supabase')}
+            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shrink-0 cursor-pointer"
+          >
+            Supabase 인증하기
+          </button>
+        </div>
+      )}
 
       {/* Main Grid: List & Detail Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

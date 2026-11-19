@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { AppState, QuoteInquiry } from '../types';
+import { AppState, B2BInquiry, PostItem, QuoteInquiry } from '../types';
 
 // Default Supabase config (can be configured via environment variables or in Admin settings)
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -1452,21 +1452,34 @@ export async function optimizeImageFileToDataUrl(
 }
 
 /**
- * Upload an image file to Supabase Storage bucket 'foodhome-media'
+ * Upload an image file to Supabase Storage bucket 'foodhome-media'.
+ * Automatically falls back to compact optimized DataURL when Storage is unavailable,
+ * while returning storageType & warning metadata so callers can advise on 5MB localStorage limits.
  */
-export async function uploadImageToStorage(file: File, folder = 'banners'): Promise<{ url: string | null; error?: string }> {
+export async function uploadImageToStorage(
+  file: File,
+  folder = 'banners'
+): Promise<{ url: string | null; storageType?: 'supabase' | 'dataurl'; warning?: string; error?: string }> {
   if (!isSupportedImageFile(file)) {
     return { url: null, error: '이미지 파일(PNG, JPG, JPEG, WEBP, GIF, SVG)만 업로드할 수 있습니다.' };
   }
 
+  const safeFolder = (folder || 'media').replace(/[^a-zA-Z0-9_-]/g, '') || 'media';
   const client = getSupabaseClient();
   if (!client) {
-    return optimizeImageFileToDataUrl(file, folder);
+    const localRes = await optimizeImageFileToDataUrl(file, safeFolder);
+    return {
+      ...localRes,
+      storageType: 'dataurl',
+      warning: localRes.url
+        ? 'Supabase 미연결 상태여서 브라우저 내부에 저장되었습니다. (5MB 용량 초과 방지를 위해 Supabase Storage 연동을 권장합니다)'
+        : undefined
+    };
   }
 
   try {
-    const fileExt = file.name.split('.').pop() || 'png';
-    const fileName = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${fileExt}`;
+    const rawExt = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
+    const fileName = `${safeFolder}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${rawExt}`;
 
     const { error: uploadError } = await client.storage
       .from('foodhome-media')
@@ -1477,14 +1490,231 @@ export async function uploadImageToStorage(file: File, folder = 'banners'): Prom
 
     if (uploadError) {
       console.warn('Supabase storage upload error, falling back to local optimized data URL:', uploadError);
-      return optimizeImageFileToDataUrl(file, folder);
+      const localRes = await optimizeImageFileToDataUrl(file, safeFolder);
+      return {
+        ...localRes,
+        storageType: 'dataurl',
+        warning: localRes.url
+          ? `Supabase Storage 업로드 권한/버킷 미설정(${uploadError.message})으로 임시 로컬 이미지로 저장되었습니다. 002_board_posts.sql 실행 및 관리자 이메일 로그인 후 Storage로 분리할 수 있습니다.`
+          : undefined
+      };
     }
 
     const { data } = client.storage.from('foodhome-media').getPublicUrl(fileName);
-    return { url: data.publicUrl };
+    return { url: data.publicUrl, storageType: 'supabase' };
   } catch {
-    return optimizeImageFileToDataUrl(file, folder);
+    const localRes = await optimizeImageFileToDataUrl(file, safeFolder);
+    return { ...localRes, storageType: 'dataurl' };
   }
+}
+
+export interface LocalStorageUsageStats {
+  totalBytes: number;
+  totalMB: number;
+  usagePercent: number;
+  isNearLimit: boolean;
+  dataUrlCount: number;
+  dataUrlBytes: number;
+  dataUrlMB: number;
+  inquiriesCount: number;
+  quotesCount: number;
+  postsCount: number;
+}
+
+/**
+ * Measure approximate localStorage footprint (`foodhome_app_data_v4`) and embedded Base64 DataURLs.
+ */
+export function getLocalStorageUsageStats(state: AppState): LocalStorageUsageStats {
+  let serialized = '';
+  try {
+    serialized = JSON.stringify(state);
+  } catch {
+    serialized = '';
+  }
+
+  const totalBytes = serialized.length * 2; // UTF-16 estimate for browser localStorage (~5MB quota)
+  const totalMB = Number((totalBytes / (1024 * 1024)).toFixed(2));
+  const quotaBytes = 5 * 1024 * 1024;
+  const usagePercent = Math.min(100, Math.round((totalBytes / quotaBytes) * 100));
+
+  let dataUrlCount = 0;
+  let dataUrlChars = 0;
+  const seen = new Set<string>();
+
+  const scan = (val: unknown) => {
+    if (typeof val === 'string') {
+      if (val.startsWith('data:image/')) {
+        dataUrlCount += 1;
+        dataUrlChars += val.length;
+        seen.add(val);
+      }
+      return;
+    }
+    if (Array.isArray(val)) {
+      val.forEach(scan);
+      return;
+    }
+    if (val && typeof val === 'object') {
+      Object.values(val as Record<string, unknown>).forEach(scan);
+    }
+  };
+
+  scan({
+    content: state.content,
+    products: state.products,
+    posts: state.posts,
+    seo: state.seo
+  });
+
+  const dataUrlBytes = dataUrlChars * 2;
+  const dataUrlMB = Number((dataUrlBytes / (1024 * 1024)).toFixed(2));
+
+  return {
+    totalBytes,
+    totalMB,
+    usagePercent,
+    isNearLimit: usagePercent >= 70,
+    dataUrlCount,
+    dataUrlBytes,
+    dataUrlMB,
+    inquiriesCount: (state.inquiries || []).length,
+    quotesCount: (state.quotes || []).length,
+    postsCount: (state.posts || []).length
+  };
+}
+
+function dataUrlToFile(dataUrl: string, fileBaseName: string): File | null {
+  try {
+    const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (!match) return null;
+    const mime = match[1];
+    const b64 = match[2];
+    const binStr = atob(b64);
+    const bytes = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) {
+      bytes[i] = binStr.charCodeAt(i);
+    }
+    const ext = mime.split('/')[1]?.replace('svg+xml', 'svg').replace('jpeg', 'jpg') || 'png';
+    return new File([bytes], `${fileBaseName}.${ext}`, { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Safely upload embedded Base64 `data:image/...` strings inside AppState to Supabase Storage (`foodhome-media`)
+ * without ever deleting an image if an upload fails.
+ */
+export async function migrateDataUrlsInStateToStorage(state: AppState): Promise<{
+  success: boolean;
+  nextState: AppState;
+  migratedCount: number;
+  failedCount: number;
+  error?: string;
+}> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      nextState: state,
+      migratedCount: 0,
+      failedCount: 0,
+      error: 'Supabase 연결 정보가 설정되지 않았습니다.'
+    };
+  }
+
+  const { data: sessionData } = await client.auth.getSession();
+  const authUser = sessionData?.session?.user;
+  if (!authUser) {
+    return {
+      success: false,
+      nextState: state,
+      migratedCount: 0,
+      failedCount: 0,
+      error: 'Supabase 관리자 이메일 계정으로 로그인한 상태에서만 Storage로 이전할 수 있습니다.'
+    };
+  }
+
+  const adminOk = await isSiteAdmin(authUser.id);
+  if (!adminOk) {
+    return {
+      success: false,
+      nextState: state,
+      migratedCount: 0,
+      failedCount: 0,
+      error: '현재 로그인한 계정에 관리자 권한(site_admins)이 없습니다.'
+    };
+  }
+
+  const uploadedCache = new Map<string, string>();
+  let migratedCount = 0;
+  let failedCount = 0;
+
+  const transformNode = async (val: unknown, folder: string): Promise<unknown> => {
+    if (typeof val === 'string') {
+      if (!val.startsWith('data:image/')) return val;
+      if (uploadedCache.has(val)) return uploadedCache.get(val)!;
+      const file = dataUrlToFile(val, `migrated_${Date.now()}`);
+      if (!file) {
+        failedCount += 1;
+        return val;
+      }
+      const ext = file.name.split('.').pop() || 'png';
+      const storagePath = `${folder}/${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
+      const { error: uploadError } = await client.storage
+        .from('foodhome-media')
+        .upload(storagePath, file, { cacheControl: '3600', upsert: false });
+      if (uploadError) {
+        failedCount += 1;
+        return val;
+      }
+      const { data: urlData } = client.storage.from('foodhome-media').getPublicUrl(storagePath);
+      if (urlData?.publicUrl) {
+        uploadedCache.set(val, urlData.publicUrl);
+        migratedCount += 1;
+        return urlData.publicUrl;
+      }
+      failedCount += 1;
+      return val;
+    }
+    if (Array.isArray(val)) {
+      const nextArr: unknown[] = [];
+      for (const item of val) {
+        nextArr.push(await transformNode(item, folder));
+      }
+      return nextArr;
+    }
+    if (val && typeof val === 'object') {
+      const nextObj: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+        nextObj[k] = await transformNode(v, folder);
+      }
+      return nextObj;
+    }
+    return val;
+  };
+
+  const nextContent = (await transformNode(state.content, 'site-media')) as AppState['content'];
+  const nextProducts = (await transformNode(state.products, 'products')) as AppState['products'];
+  const nextPosts = (await transformNode(state.posts, 'posts')) as AppState['posts'];
+  const nextSeo = (await transformNode(state.seo, 'seo')) as AppState['seo'];
+
+  return {
+    success: failedCount === 0 || migratedCount > 0,
+    nextState: {
+      ...state,
+      content: nextContent,
+      products: nextProducts,
+      posts: nextPosts,
+      seo: nextSeo
+    },
+    migratedCount,
+    failedCount,
+    error:
+      failedCount > 0 && migratedCount === 0
+        ? 'Storage 업로드에 실패했습니다. 002_board_posts.sql의 foodhome-media 버킷 및 RLS 정책을 실행했는지 확인해 주세요.'
+        : undefined
+  };
 }
 
 /**
@@ -1738,6 +1968,770 @@ export async function verifyQuotePasswordWithHash(plainPassword: string, storedH
   return false;
 }
 
+export interface BoardPostRow {
+  id: string;
+  board_type: string;
+  category: string;
+  title: string;
+  author_name: string;
+  content: string;
+  thumbnail?: string | null;
+  tags?: string[] | null;
+  is_pinned?: boolean | null;
+  is_secret?: boolean | null;
+  read_count?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+function mapBoardPostRowToItem(row: BoardPostRow): PostItem {
+  const createdStr = (row.created_at || new Date().toISOString()).slice(0, 10);
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category || '공지사항',
+    author: row.author_name || '푸드홈',
+    date: createdStr,
+    content: row.content || '',
+    readCount: Number(row.read_count) || 0,
+    thumbnail: row.thumbnail || '',
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    isPinned: Boolean(row.is_pinned)
+  };
+}
+
+export interface FetchBoardPostsResult {
+  ok: boolean;
+  posts: PostItem[];
+  tableMissing?: boolean;
+  error?: string;
+}
+
+/**
+ * Fetch public board posts from `public.board_posts`.
+ * Uses cache-busted anonymous REST for visitors, or authenticated client for admins.
+ */
+export async function fetchBoardPosts(isAdminAuthed = false): Promise<FetchBoardPostsResult> {
+  const cfg = getSavedSupabaseConfig();
+  const activeUrl = normalizeSupabaseUrl(cfg.url || '');
+  const activeKey = (cfg.anonKey || '').trim();
+
+  if (!activeUrl || !activeKey) {
+    return { ok: false, posts: [], error: 'Supabase 미연결' };
+  }
+
+  if (!isAdminAuthed && typeof fetch === 'function') {
+    try {
+      const endpoint = `${activeUrl}/rest/v1/board_posts?select=id,board_type,category,title,author_name,content,thumbnail,tags,is_pinned,is_secret,read_count,status,created_at,updated_at&order=is_pinned.desc,created_at.desc`;
+      const resp = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          apikey: activeKey,
+          Authorization: `Bearer ${activeKey}`,
+          Accept: 'application/json'
+        },
+        cache: 'no-store'
+      });
+
+      if (resp.ok) {
+        const rows = (await resp.json()) as BoardPostRow[];
+        return {
+          ok: true,
+          posts: Array.isArray(rows) ? rows.map(mapBoardPostRowToItem) : []
+        };
+      }
+
+      if (resp.status === 404) {
+        return { ok: false, posts: [], tableMissing: true, error: 'board_posts 테이블이 아직 생성되지 않았습니다.' };
+      }
+    } catch {
+      // Fall through to JS client
+    }
+  }
+
+  const client = getSupabaseClient();
+  if (!client) {
+    return { ok: false, posts: [], error: 'Supabase 클라이언트 초기화 실패' };
+  }
+
+  try {
+    const { data, error } = await client
+      .from('board_posts')
+      .select('id, board_type, category, title, author_name, content, thumbnail, tags, is_pinned, is_secret, read_count, status, created_at, updated_at')
+      .order('is_pinned', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      const msg = error.message || '';
+      const tableMissing =
+        error.code === '42P01' ||
+        error.code === 'PGRST205' ||
+        msg.includes('board_posts');
+      return { ok: false, posts: [], tableMissing, error: msg };
+    }
+
+    return {
+      ok: true,
+      posts: ((data || []) as BoardPostRow[]).map(mapBoardPostRowToItem)
+    };
+  } catch (e: any) {
+    return { ok: false, posts: [], error: e?.message || '게시글 조회 오류' };
+  }
+}
+
+export async function createBoardPostInDb(post: PostItem, visitorPassword?: string): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    const boardType =
+      post.category === '조리·활용 레시피'
+        ? 'recipe'
+        : post.category === 'B2B 납품스토리'
+        ? 'story'
+        : post.category === '이벤트'
+        ? 'event'
+        : post.category === '공지사항'
+        ? 'notice'
+        : 'community';
+
+    if (visitorPassword && visitorPassword.trim()) {
+      const pwHash = await hashPassword(visitorPassword.trim());
+      const { error } = await client.rpc('create_visitor_board_post', {
+        p_id: post.id,
+        p_board_type: boardType,
+        p_category: post.category || '고객소통',
+        p_title: post.title,
+        p_author_name: post.author || '방문자',
+        p_content: post.content,
+        p_thumbnail: post.thumbnail || '',
+        p_tags: post.tags || [],
+        p_password_hash: pwHash
+      });
+      if (error) return { success: false, error: error.message };
+      return { success: true };
+    }
+
+    const { error } = await client.from('board_posts').insert([
+      {
+        id: post.id,
+        board_type: boardType,
+        category: post.category || '공지사항',
+        title: post.title,
+        author_name: post.author || '푸드홈',
+        content: post.content,
+        thumbnail: post.thumbnail || '',
+        tags: post.tags || [],
+        is_pinned: Boolean(post.isPinned),
+        is_secret: false,
+        read_count: post.readCount || 1,
+        status: 'published',
+        created_at: post.date ? `${post.date}T00:00:00.000Z` : new Date().toISOString()
+      }
+    ]);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '게시글 저장 실패' };
+  }
+}
+
+export async function updateBoardPostInDb(
+  id: string,
+  updates: Partial<PostItem>,
+  visitorPassword?: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    if (visitorPassword && visitorPassword.trim()) {
+      const pwHash = await hashPassword(visitorPassword.trim());
+      const { data, error } = await client.rpc('update_visitor_board_post', {
+        p_id: id,
+        p_password_hash: pwHash,
+        p_title: updates.title || '',
+        p_content: updates.content || ''
+      });
+      if (error) return { success: false, error: error.message };
+      if (!data) return { success: false, error: '비밀번호가 일치하지 않거나 권한이 없습니다.' };
+      return { success: true };
+    }
+
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (updates.title !== undefined) patch.title = updates.title;
+    if (updates.category !== undefined) patch.category = updates.category;
+    if (updates.author !== undefined) patch.author_name = updates.author;
+    if (updates.content !== undefined) patch.content = updates.content;
+    if (updates.thumbnail !== undefined) patch.thumbnail = updates.thumbnail;
+    if (updates.tags !== undefined) patch.tags = updates.tags;
+    if (updates.isPinned !== undefined) patch.is_pinned = updates.isPinned;
+
+    const { error } = await client.from('board_posts').update(patch).eq('id', id);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '게시글 수정 실패' };
+  }
+}
+
+export async function deleteBoardPostInDb(
+  id: string,
+  visitorPassword?: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    if (visitorPassword && visitorPassword.trim()) {
+      const pwHash = await hashPassword(visitorPassword.trim());
+      const { data, error } = await client.rpc('delete_visitor_board_post', {
+        p_id: id,
+        p_password_hash: pwHash
+      });
+      if (error) return { success: false, error: error.message };
+      if (!data) return { success: false, error: '비밀번호가 일치하지 않거나 권한이 없습니다.' };
+      return { success: true };
+    }
+
+    const { error } = await client.from('board_posts').delete().eq('id', id);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '게시글 삭제 실패' };
+  }
+}
+
+export async function incrementBoardPostReadInDb(id: string): Promise<void> {
+  const client = getSupabaseClient();
+  if (!client) return;
+  try {
+    await client.rpc('increment_board_post_read', { p_id: id });
+  } catch {
+    // Ignore read count sync error gracefully
+  }
+}
+
+export async function migrateLocalPostsToBoardTable(posts: PostItem[]): Promise<{
+  success: boolean;
+  count: number;
+  error?: string;
+}> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, count: 0, error: 'Supabase 미연결' };
+  if (!posts || posts.length === 0) return { success: true, count: 0 };
+
+  try {
+    const rows = posts.map((post) => {
+      const boardType =
+        post.category === '조리·활용 레시피'
+          ? 'recipe'
+          : post.category === 'B2B 납품스토리'
+          ? 'story'
+          : post.category === '이벤트'
+          ? 'event'
+          : post.category === '공지사항'
+          ? 'notice'
+          : 'community';
+      return {
+        id: post.id,
+        board_type: boardType,
+        category: post.category || '공지사항',
+        title: post.title,
+        author_name: post.author || '푸드홈',
+        content: post.content || '',
+        thumbnail: post.thumbnail || '',
+        tags: Array.isArray(post.tags) ? post.tags : [],
+        is_pinned: Boolean(post.isPinned),
+        is_secret: false,
+        read_count: Number(post.readCount) || 1,
+        status: 'published',
+        created_at: post.date ? `${post.date}T00:00:00.000Z` : new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+    });
+
+    const { error } = await client.from('board_posts').upsert(rows, { onConflict: 'id' });
+    if (error) return { success: false, count: 0, error: error.message };
+    return { success: true, count: rows.length };
+  } catch (e: any) {
+    return { success: false, count: 0, error: e?.message || '공개 게시글 이전 실패' };
+  }
+}
+
+export interface FetchPrivateBoardResult {
+  ok: boolean;
+  inquiries: B2BInquiry[];
+  quotes: QuoteInquiry[];
+  tableMissing?: boolean;
+  error?: string;
+}
+
+function mapAdminPrivateRowToSampleInquiry(row: any): B2BInquiry {
+  return {
+    id: row.id,
+    postNumber: Number(row.post_number) || 1,
+    title: row.title || '',
+    companyName: row.company_name || row.store_name || '',
+    storeName: row.store_name || row.company_name || '',
+    contactPerson: row.contact_person || '',
+    writer: row.writer_masked || '고객',
+    phone: row.phone || '',
+    email: row.email || '',
+    businessType: row.business_type || '외식업체',
+    requestType: (row.request_type as any) || '무료 샘플 요청',
+    monthlyUsage: row.monthly_usage || '',
+    region: row.region || '',
+    address: row.address || '',
+    selectedProducts: Array.isArray(row.selected_products) ? row.selected_products : [],
+    message: row.message || '',
+    status: row.status || '접수완료',
+    isSecret: row.is_secret ?? true,
+    readCount: Number(row.read_count) || 1,
+    createdAt: (row.created_at || new Date().toISOString()).slice(0, 10),
+    adminReply: row.admin_reply || undefined,
+    adminMemo: row.admin_memo || ''
+  };
+}
+
+function mapAdminPrivateRowToQuoteInquiry(row: any): QuoteInquiry {
+  return {
+    id: row.id,
+    postNumber: Number(row.post_number) || 1,
+    title: row.title || '',
+    companyName: row.company_name || '',
+    contactPerson: row.contact_person || '',
+    phone: row.phone || '',
+    email: row.email || '',
+    region: row.region || '',
+    businessType: row.business_type || '',
+    interestedProducts: Array.isArray(row.selected_products) ? row.selected_products : [],
+    monthlyVolume: row.monthly_usage || '',
+    deliverySchedule: row.delivery_schedule || '',
+    message: row.message || '',
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    passwordHash: row.password_hash || undefined,
+    isSecret: row.is_secret ?? true,
+    status: row.status || '접수완료',
+    readCount: Number(row.read_count) || 1,
+    createdAt: (row.created_at || new Date().toISOString()).slice(0, 10),
+    adminReply: row.admin_reply || undefined,
+    adminMemo: row.admin_memo || ''
+  };
+}
+
+/**
+ * Fetch private inquiry boards (`sample` & `quote`):
+ * - Admin (`isAdminAuthed = true`): Reads full rows via RLS (`is_site_admin()`).
+ * - Public Visitor: Reads strictly masked summaries via `get_public_inquiry_board` RPC (ZERO PII).
+ */
+export async function fetchPrivateInquiriesForBoard(isAdminAuthed = false): Promise<FetchPrivateBoardResult> {
+  const client = getSupabaseClient();
+  if (!client) return { ok: false, inquiries: [], quotes: [], error: 'Supabase 미연결' };
+
+  try {
+    if (isAdminAuthed) {
+      const { data, error } = await client
+        .from('board_private_inquiries')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .order('post_number', { ascending: false });
+
+      if (error) {
+        const msg = error.message || '';
+        const tableMissing =
+          error.code === '42P01' || error.code === 'PGRST205' || msg.includes('board_private_inquiries');
+        return { ok: false, inquiries: [], quotes: [], tableMissing, error: msg };
+      }
+
+      const rows = data || [];
+      return {
+        ok: true,
+        inquiries: rows
+          .filter((r: any) => r.inquiry_type === 'sample')
+          .map(mapAdminPrivateRowToSampleInquiry),
+        quotes: rows
+          .filter((r: any) => r.inquiry_type === 'quote')
+          .map(mapAdminPrivateRowToQuoteInquiry)
+      };
+    }
+
+    // Anonymous / regular visitor: call masked summary RPC (NO PII exposed!)
+    const { data, error } = await client.rpc('get_public_inquiry_board', {
+      p_inquiry_type: null
+    });
+
+    if (error) {
+      const msg = error.message || '';
+      const tableMissing =
+        error.code === '42883' ||
+        error.code === 'PGRST202' ||
+        msg.includes('get_public_inquiry_board');
+      return { ok: false, inquiries: [], quotes: [], tableMissing, error: msg };
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    const inquiries: B2BInquiry[] = [];
+    const quotes: QuoteInquiry[] = [];
+
+    for (const row of rows) {
+      const createdAt = (row.created_at || new Date().toISOString()).slice(0, 10);
+      if (row.inquiry_type === 'sample') {
+        inquiries.push({
+          id: row.id,
+          postNumber: Number(row.post_number) || 1,
+          title: row.title,
+          companyName: row.store_masked || '비공개',
+          storeName: row.store_masked || '비공개',
+          contactPerson: row.writer_masked || '고객',
+          writer: row.writer_masked || '고객',
+          phone: '',
+          email: '',
+          businessType: '외식업체',
+          requestType: '무료 샘플 요청',
+          monthlyUsage: '',
+          region: '',
+          address: '',
+          selectedProducts: [],
+          message: '',
+          status: row.status || '접수완료',
+          isSecret: row.is_secret ?? true,
+          readCount: Number(row.read_count) || 1,
+          createdAt,
+          adminReply: row.has_reply
+            ? { author: '푸드홈', repliedAt: createdAt, content: '' }
+            : undefined
+        });
+      } else if (row.inquiry_type === 'quote') {
+        quotes.push({
+          id: row.id,
+          postNumber: Number(row.post_number) || 1,
+          title: row.title,
+          companyName: row.store_masked || '비공개',
+          contactPerson: row.writer_masked || '고객',
+          phone: '',
+          interestedProducts: [],
+          message: '',
+          isSecret: row.is_secret ?? true,
+          status: row.status || '접수완료',
+          readCount: Number(row.read_count) || 1,
+          createdAt,
+          adminReply: row.has_reply
+            ? { author: '푸드홈', repliedAt: createdAt, content: '' }
+            : undefined
+        });
+      }
+    }
+
+    return { ok: true, inquiries, quotes };
+  } catch (e: any) {
+    return { ok: false, inquiries: [], quotes: [], error: e?.message || '비공개 게시판 조회 오류' };
+  }
+}
+
+export async function submitPrivateInquiryToBoard(params: {
+  id: string;
+  inquiryType: 'sample' | 'quote';
+  postNumber: number;
+  title: string;
+  companyName: string;
+  storeName?: string;
+  contactPerson: string;
+  writerMasked: string;
+  phone: string;
+  email?: string;
+  region?: string;
+  address?: string;
+  businessType?: string;
+  requestType?: string;
+  monthlyUsage?: string;
+  deliverySchedule?: string;
+  selectedProducts?: string[];
+  attachments?: { name: string; url?: string; size?: string }[];
+  message: string;
+  password: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    const passwordHash = await hashPassword((params.password || '').trim() || params.phone || '0000');
+    const { error } = await client.from('board_private_inquiries').insert([
+      {
+        id: params.id,
+        inquiry_type: params.inquiryType,
+        post_number: params.postNumber,
+        title: params.title,
+        company_name: params.companyName || params.storeName || '',
+        store_name: params.storeName || params.companyName || '',
+        contact_person: params.contactPerson || '',
+        writer_masked: params.writerMasked || '고객',
+        phone: params.phone || '',
+        email: params.email || '',
+        region: params.region || '',
+        address: params.address || '',
+        business_type: params.businessType || '외식업체',
+        request_type: params.requestType || (params.inquiryType === 'quote' ? '대량 납품 견적' : '무료 샘플 요청'),
+        monthly_usage: params.monthlyUsage || '',
+        delivery_schedule: params.deliverySchedule || '',
+        selected_products: params.selectedProducts || [],
+        attachments: params.attachments || [],
+        message: params.message || '',
+        password_hash: passwordHash,
+        is_secret: true,
+        status: '접수완료',
+        read_count: 1
+      }
+    ]);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '비공개 문의 저장 실패' };
+  }
+}
+
+export async function unlockPrivateInquiryFromBoard(
+  id: string,
+  plainPassword: string
+): Promise<{
+  ok: boolean;
+  passwordHash: string;
+  sampleItem?: B2BInquiry;
+  quoteItem?: QuoteInquiry;
+  error?: string;
+}> {
+  const passwordHash = await hashPassword((plainPassword || '').trim());
+  const client = getSupabaseClient();
+  if (!client) return { ok: false, passwordHash, error: 'Supabase 미연결' };
+
+  try {
+    const { data, error } = await client.rpc('unlock_private_inquiry', {
+      p_id: id,
+      p_password_hash: passwordHash
+    });
+
+    if (error) return { ok: false, passwordHash, error: error.message };
+    if (!data || !data.ok || !data.item) {
+      return { ok: false, passwordHash, error: data?.error || '비밀번호가 일치하지 않습니다.' };
+    }
+
+    const row = data.item;
+    if (row.inquiry_type === 'quote') {
+      return {
+        ok: true,
+        passwordHash,
+        quoteItem: mapAdminPrivateRowToQuoteInquiry(row)
+      };
+    }
+    return {
+      ok: true,
+      passwordHash,
+      sampleItem: mapAdminPrivateRowToSampleInquiry(row)
+    };
+  } catch (e: any) {
+    return { ok: false, passwordHash, error: e?.message || '비밀글 열람 오류' };
+  }
+}
+
+export async function updatePrivateInquiryByAuthorInBoard(
+  id: string,
+  passwordHash: string,
+  title: string,
+  message: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    const { data, error } = await client.rpc('update_private_inquiry_with_password', {
+      p_id: id,
+      p_password_hash: passwordHash,
+      p_title: title,
+      p_message: message
+    });
+    if (error) return { success: false, error: error.message };
+    if (!data) return { success: false, error: '수정 권한이 없거나 비밀번호가 일치하지 않습니다.' };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '수정 중 오류가 발생했습니다.' };
+  }
+}
+
+export async function deletePrivateInquiryByAuthorInBoard(
+  id: string,
+  passwordHash: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    const { data, error } = await client.rpc('delete_private_inquiry_with_password', {
+      p_id: id,
+      p_password_hash: passwordHash
+    });
+    if (error) return { success: false, error: error.message };
+    if (!data) return { success: false, error: '삭제 권한이 없거나 비밀번호가 일치하지 않습니다.' };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '삭제 중 오류가 발생했습니다.' };
+  }
+}
+
+export async function adminUpdatePrivateInquiryInBoard(
+  id: string,
+  patch: {
+    status?: string;
+    adminMemo?: string;
+    adminReply?: { content: string; repliedAt: string; author: string };
+    title?: string;
+    message?: string;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (patch.status !== undefined) updatePayload.status = patch.status;
+    if (patch.adminMemo !== undefined) updatePayload.admin_memo = patch.adminMemo;
+    if (patch.adminReply !== undefined) updatePayload.admin_reply = patch.adminReply;
+    if (patch.title !== undefined) updatePayload.title = patch.title;
+    if (patch.message !== undefined) updatePayload.message = patch.message;
+
+    const { error } = await client
+      .from('board_private_inquiries')
+      .update(updatePayload)
+      .eq('id', id);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '문의 업데이트 실패' };
+  }
+}
+
+export async function adminDeletePrivateInquiryInBoard(id: string): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'Supabase 미연결' };
+
+  try {
+    const { error } = await client.from('board_private_inquiries').delete().eq('id', id);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: e?.message || '문의 삭제 실패' };
+  }
+}
+
+export async function migrateLocalInquiriesAndQuotesToBoard(
+  inquiries: B2BInquiry[],
+  quotes: QuoteInquiry[]
+): Promise<{ success: boolean; count: number; error?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, count: 0, error: 'Supabase 미연결' };
+
+  try {
+    const sampleRows = await Promise.all(
+      (inquiries || []).map(async (inq, idx) => {
+        const plainOrDefault = (inq.password || '').trim() || '1234';
+        const pwHash = await hashPassword(plainOrDefault);
+        const name = (inq.contactPerson || '').trim();
+        const masked =
+          inq.writer ||
+          (name.length > 2 ? name[0] + '*'.repeat(name.length - 2) + name[name.length - 1] : name.length === 2 ? `${name[0]}*` : name || '고객');
+
+        return {
+          id: inq.id,
+          inquiry_type: 'sample',
+          post_number: Number(inq.postNumber) || inquiries.length - idx,
+          title: inq.title || `[${inq.storeName || inq.companyName}] 무료 샘플 신청합니다.`,
+          company_name: inq.companyName || inq.storeName || '',
+          store_name: inq.storeName || inq.companyName || '',
+          contact_person: inq.contactPerson || '',
+          writer_masked: masked,
+          phone: inq.phone || '',
+          email: inq.email || '',
+          region: inq.region || '',
+          address: inq.address || '',
+          business_type: inq.businessType || '외식업체',
+          request_type: inq.requestType || '무료 샘플 요청',
+          monthly_usage: inq.monthlyUsage || '',
+          delivery_schedule: '',
+          selected_products: Array.isArray(inq.selectedProducts) ? inq.selectedProducts : [],
+          attachments: [],
+          message: inq.message || '',
+          password_hash: pwHash,
+          is_secret: inq.isSecret ?? true,
+          status: inq.status || '접수완료',
+          read_count: Number(inq.readCount) || 1,
+          admin_reply: inq.adminReply || null,
+          admin_memo: inq.adminMemo || '',
+          created_at: inq.createdAt && inq.createdAt.length >= 10
+            ? `${inq.createdAt.slice(0, 10)}T00:00:00.000Z`
+            : new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      })
+    );
+
+    const quoteRows = await Promise.all(
+      (quotes || []).map(async (q, idx) => {
+        const pwHash = q.passwordHash || (await hashPassword((q.rawPasswordHint || '').trim() || '1234'));
+        const name = (q.contactPerson || '').trim();
+        const masked =
+          name.length > 2 ? name[0] + '*'.repeat(name.length - 2) + name[name.length - 1] : name.length === 2 ? `${name[0]}*` : name || '고객';
+
+        return {
+          id: q.id,
+          inquiry_type: 'quote',
+          post_number: Number(q.postNumber) || quotes.length - idx,
+          title: q.title || `[${q.companyName}] 납품 견적 상담 문의`,
+          company_name: q.companyName || '',
+          store_name: q.companyName || '',
+          contact_person: q.contactPerson || '',
+          writer_masked: masked,
+          phone: q.phone || '',
+          email: q.email || '',
+          region: q.region || '',
+          address: '',
+          business_type: q.businessType || '',
+          request_type: '대량 납품 견적',
+          monthly_usage: q.monthlyVolume || '',
+          delivery_schedule: q.deliverySchedule || '',
+          selected_products: Array.isArray(q.interestedProducts) ? q.interestedProducts : [],
+          attachments: Array.isArray(q.attachments) ? q.attachments : [],
+          message: q.message || '',
+          password_hash: pwHash,
+          is_secret: q.isSecret ?? true,
+          status: q.status || '접수완료',
+          read_count: Number(q.readCount) || 1,
+          admin_reply: q.adminReply || null,
+          admin_memo: q.adminMemo || '',
+          created_at: q.createdAt && q.createdAt.length >= 10
+            ? `${q.createdAt.slice(0, 10)}T00:00:00.000Z`
+            : new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      })
+    );
+
+    const allRows = [...sampleRows, ...quoteRows];
+    if (allRows.length === 0) return { success: true, count: 0 };
+
+    const { error } = await client.from('board_private_inquiries').upsert(allRows, { onConflict: 'id' });
+    if (error) return { success: false, count: 0, error: error.message };
+    return { success: true, count: allRows.length };
+  } catch (e: any) {
+    return { success: false, count: 0, error: e?.message || '비공개 문의 이전 실패' };
+  }
+}
+
 /**
  * Phase 1 Safe SQL Migration Script for Supabase (`site_contents` only)
  */
@@ -1792,6 +2786,378 @@ BEGIN
       TO authenticated
       USING (public.is_site_admin())
       WITH CHECK (public.is_site_admin());
+  END IF;
+END
+$$;
+`;
+
+/**
+ * Phase 2 Safe SQL Migration Script for Supabase (`board_posts`, `board_private_inquiries`, `foodhome-media` Storage)
+ */
+export const SUPABASE_BOARD_SETUP_SQL = `-- ============================================================================
+-- FOODHOME (푸드홈) 2차 마이그레이션: 게시판 원격 DB 동기화 & Storage 버킷 설정
+-- ============================================================================
+-- [안전 원칙]
+-- 1. 기존 테이블(site_admins, site_contents, form_definitions, form_submissions)
+--    및 기존 데이터를 절대 삭제하거나 수정하지 않습니다.
+-- 2. 공개 게시판(board_posts)과 개인정보 포함 비공개 문의(board_private_inquiries)를
+--    엄격히 분리하여 일반 방문자에게 연락처/주소/이메일이 절대 노출되지 않습니다.
+-- 3. localStorage 5MB 초과 방지를 위해 'foodhome-media' Storage 버킷과 정책을 생성합니다.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.board_posts (
+  id TEXT PRIMARY KEY,
+  board_type TEXT NOT NULL DEFAULT 'notice',
+  category TEXT NOT NULL DEFAULT '공지사항',
+  title TEXT NOT NULL,
+  author_name TEXT NOT NULL DEFAULT '푸드홈',
+  content TEXT NOT NULL,
+  thumbnail TEXT DEFAULT '',
+  tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_pinned BOOLEAN NOT NULL DEFAULT false,
+  is_secret BOOLEAN NOT NULL DEFAULT false,
+  read_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'published',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_board_posts_created_at
+  ON public.board_posts (is_pinned DESC, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_board_posts_category
+  ON public.board_posts (category);
+
+ALTER TABLE public.board_posts ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS public.board_post_secrets (
+  post_id TEXT PRIMARY KEY REFERENCES public.board_posts(id) ON DELETE CASCADE,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.board_post_secrets ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'board_posts'
+      AND policyname = 'Public can read published board posts'
+  ) THEN
+    CREATE POLICY "Public can read published board posts"
+      ON public.board_posts FOR SELECT TO public
+      USING (is_secret = false AND status = 'published');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'board_posts'
+      AND policyname = 'Public can create board posts'
+  ) THEN
+    CREATE POLICY "Public can create board posts"
+      ON public.board_posts FOR INSERT TO public
+      WITH CHECK (
+        is_secret = false AND status = 'published' AND is_pinned = false
+        AND char_length(trim(title)) > 0 AND char_length(trim(content)) > 0
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'board_posts'
+      AND policyname = 'Admins can manage all board posts'
+  ) THEN
+    CREATE POLICY "Admins can manage all board posts"
+      ON public.board_posts FOR ALL TO authenticated
+      USING (public.is_site_admin()) WITH CHECK (public.is_site_admin());
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'board_post_secrets'
+      AND policyname = 'Admins can manage board post secrets'
+  ) THEN
+    CREATE POLICY "Admins can manage board post secrets"
+      ON public.board_post_secrets FOR ALL TO authenticated
+      USING (public.is_site_admin()) WITH CHECK (public.is_site_admin());
+  END IF;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION public.increment_board_post_read(p_id TEXT)
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_next INTEGER;
+BEGIN
+  UPDATE public.board_posts
+  SET read_count = COALESCE(read_count, 0) + 1
+  WHERE id = p_id AND (is_secret = false OR public.is_site_admin())
+  RETURNING read_count INTO v_next;
+  RETURN COALESCE(v_next, 0);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.increment_board_post_read(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.increment_board_post_read(TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.create_visitor_board_post(
+  p_id TEXT, p_board_type TEXT, p_category TEXT, p_title TEXT,
+  p_author_name TEXT, p_content TEXT, p_thumbnail TEXT DEFAULT '',
+  p_tags JSONB DEFAULT '[]'::jsonb, p_password_hash TEXT DEFAULT NULL
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_row public.board_posts%ROWTYPE;
+BEGIN
+  IF char_length(trim(COALESCE(p_title, ''))) = 0 OR char_length(trim(COALESCE(p_content, ''))) = 0 THEN
+    RAISE EXCEPTION '제목과 본문을 입력해 주세요.';
+  END IF;
+  INSERT INTO public.board_posts (
+    id, board_type, category, title, author_name, content, thumbnail, tags,
+    is_pinned, is_secret, read_count, status, created_at, updated_at
+  )
+  VALUES (
+    p_id, COALESCE(NULLIF(trim(p_board_type), ''), 'community'),
+    COALESCE(NULLIF(trim(p_category), ''), '고객소통'), trim(p_title),
+    COALESCE(NULLIF(trim(p_author_name), ''), '방문자'), trim(p_content),
+    COALESCE(p_thumbnail, ''), COALESCE(p_tags, '[]'::jsonb),
+    false, false, 1, 'published', now(), now()
+  )
+  RETURNING * INTO v_row;
+  IF p_password_hash IS NOT NULL AND char_length(trim(p_password_hash)) > 0 THEN
+    INSERT INTO public.board_post_secrets (post_id, password_hash)
+    VALUES (v_row.id, trim(p_password_hash))
+    ON CONFLICT (post_id) DO UPDATE SET password_hash = EXCLUDED.password_hash;
+  END IF;
+  RETURN to_jsonb(v_row);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.create_visitor_board_post(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.create_visitor_board_post(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.update_visitor_board_post(
+  p_id TEXT, p_password_hash TEXT, p_title TEXT, p_content TEXT
+)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_is_admin BOOLEAN := public.is_site_admin(); v_match BOOLEAN := false;
+BEGIN
+  IF NOT v_is_admin THEN
+    SELECT EXISTS (SELECT 1 FROM public.board_post_secrets WHERE post_id = p_id AND password_hash = trim(COALESCE(p_password_hash, ''))) INTO v_match;
+    IF NOT v_match THEN RETURN false; END IF;
+  END IF;
+  UPDATE public.board_posts
+  SET title = COALESCE(NULLIF(trim(p_title), ''), title),
+      content = COALESCE(NULLIF(trim(p_content), ''), content),
+      updated_at = now()
+  WHERE id = p_id;
+  RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.update_visitor_board_post(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.update_visitor_board_post(TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.delete_visitor_board_post(p_id TEXT, p_password_hash TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_is_admin BOOLEAN := public.is_site_admin(); v_match BOOLEAN := false;
+BEGIN
+  IF NOT v_is_admin THEN
+    SELECT EXISTS (SELECT 1 FROM public.board_post_secrets WHERE post_id = p_id AND password_hash = trim(COALESCE(p_password_hash, ''))) INTO v_match;
+    IF NOT v_match THEN RETURN false; END IF;
+  END IF;
+  DELETE FROM public.board_posts WHERE id = p_id;
+  RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.delete_visitor_board_post(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.delete_visitor_board_post(TEXT, TEXT) TO anon, authenticated;
+
+CREATE TABLE IF NOT EXISTS public.board_private_inquiries (
+  id TEXT PRIMARY KEY,
+  inquiry_type TEXT NOT NULL CHECK (inquiry_type IN ('sample', 'quote')),
+  post_number INTEGER NOT NULL DEFAULT 1,
+  title TEXT NOT NULL,
+  company_name TEXT NOT NULL DEFAULT '',
+  store_name TEXT DEFAULT '',
+  contact_person TEXT NOT NULL DEFAULT '',
+  writer_masked TEXT NOT NULL DEFAULT '고객',
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT DEFAULT '',
+  region TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  business_type TEXT DEFAULT '',
+  request_type TEXT DEFAULT '무료 샘플 요청',
+  monthly_usage TEXT DEFAULT '',
+  delivery_schedule TEXT DEFAULT '',
+  selected_products JSONB NOT NULL DEFAULT '[]'::jsonb,
+  attachments JSONB NOT NULL DEFAULT '[]'::jsonb,
+  message TEXT DEFAULT '',
+  password_hash TEXT NOT NULL,
+  is_secret BOOLEAN NOT NULL DEFAULT true,
+  status TEXT NOT NULL DEFAULT '접수완료',
+  read_count INTEGER NOT NULL DEFAULT 1,
+  admin_reply JSONB,
+  admin_memo TEXT DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_board_private_inquiries_type_created
+  ON public.board_private_inquiries (inquiry_type, created_at DESC);
+
+ALTER TABLE public.board_private_inquiries ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'board_private_inquiries'
+      AND policyname = 'Public can submit private inquiries'
+  ) THEN
+    CREATE POLICY "Public can submit private inquiries"
+      ON public.board_private_inquiries FOR INSERT TO public
+      WITH CHECK (
+        inquiry_type IN ('sample', 'quote')
+        AND char_length(trim(title)) > 0 AND char_length(trim(password_hash)) > 0
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'board_private_inquiries'
+      AND policyname = 'Admins can manage all private inquiries'
+  ) THEN
+    CREATE POLICY "Admins can manage all private inquiries"
+      ON public.board_private_inquiries FOR ALL TO authenticated
+      USING (public.is_site_admin()) WITH CHECK (public.is_site_admin());
+  END IF;
+END
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_public_inquiry_board(p_inquiry_type TEXT DEFAULT NULL)
+RETURNS TABLE (
+  id TEXT, inquiry_type TEXT, post_number INTEGER, title TEXT,
+  writer_masked TEXT, store_masked TEXT, status TEXT, is_secret BOOLEAN,
+  has_reply BOOLEAN, read_count INTEGER, created_at TIMESTAMPTZ
+)
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  SELECT
+    i.id, i.inquiry_type, i.post_number,
+    regexp_replace(
+      regexp_replace(COALESCE(i.title, ''), '\\d{2,3}[-\\s]?\\d{3,4}[-\\s]?\\d{4}', '***-****', 'g'),
+      '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}', '****@****', 'g'
+    ) AS title,
+    COALESCE(NULLIF(i.writer_masked, ''), '고객') AS writer_masked,
+    CASE
+      WHEN char_length(COALESCE(NULLIF(i.store_name, ''), i.company_name, '')) <= 2
+        THEN COALESCE(NULLIF(i.store_name, ''), i.company_name, '비공개')
+      ELSE left(COALESCE(NULLIF(i.store_name, ''), i.company_name), 2) || '**'
+    END AS store_masked,
+    i.status, i.is_secret, (i.admin_reply IS NOT NULL) AS has_reply,
+    COALESCE(i.read_count, 1) AS read_count, i.created_at
+  FROM public.board_private_inquiries i
+  WHERE (p_inquiry_type IS NULL OR i.inquiry_type = p_inquiry_type)
+  ORDER BY i.created_at DESC, i.post_number DESC;
+$$;
+
+REVOKE ALL ON FUNCTION public.get_public_inquiry_board(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_public_inquiry_board(TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.unlock_private_inquiry(p_id TEXT, p_password_hash TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_row public.board_private_inquiries%ROWTYPE; v_is_admin BOOLEAN := public.is_site_admin();
+BEGIN
+  SELECT * INTO v_row FROM public.board_private_inquiries WHERE id = p_id;
+  IF NOT FOUND THEN RETURN jsonb_build_object('ok', false, 'error', '게시글을 찾을 수 없습니다.'); END IF;
+  IF NOT v_is_admin THEN
+    IF v_row.password_hash IS DISTINCT FROM trim(COALESCE(p_password_hash, '')) THEN
+      RETURN jsonb_build_object('ok', false, 'error', '비밀번호가 일치하지 않습니다.');
+    END IF;
+  END IF;
+  UPDATE public.board_private_inquiries SET read_count = COALESCE(read_count, 0) + 1 WHERE id = p_id RETURNING * INTO v_row;
+  RETURN jsonb_build_object(
+    'ok', true,
+    'item', jsonb_build_object(
+      'id', v_row.id, 'inquiry_type', v_row.inquiry_type, 'post_number', v_row.post_number,
+      'title', v_row.title, 'company_name', v_row.company_name, 'store_name', v_row.store_name,
+      'contact_person', v_row.contact_person, 'writer_masked', v_row.writer_masked,
+      'phone', v_row.phone, 'email', v_row.email, 'region', v_row.region, 'address', v_row.address,
+      'business_type', v_row.business_type, 'request_type', v_row.request_type,
+      'monthly_usage', v_row.monthly_usage, 'delivery_schedule', v_row.delivery_schedule,
+      'selected_products', v_row.selected_products, 'attachments', v_row.attachments,
+      'message', v_row.message, 'is_secret', v_row.is_secret, 'status', v_row.status,
+      'read_count', v_row.read_count, 'admin_reply', v_row.admin_reply,
+      'admin_memo', CASE WHEN v_is_admin THEN v_row.admin_memo ELSE NULL END,
+      'created_at', v_row.created_at
+    )
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.unlock_private_inquiry(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.unlock_private_inquiry(TEXT, TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.update_private_inquiry_with_password(
+  p_id TEXT, p_password_hash TEXT, p_title TEXT, p_message TEXT
+)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_is_admin BOOLEAN := public.is_site_admin();
+BEGIN
+  UPDATE public.board_private_inquiries
+  SET title = COALESCE(NULLIF(trim(p_title), ''), title), message = COALESCE(p_message, message), updated_at = now()
+  WHERE id = p_id AND (v_is_admin OR password_hash = trim(COALESCE(p_password_hash, '')));
+  RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.update_private_inquiry_with_password(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.update_private_inquiry_with_password(TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.delete_private_inquiry_with_password(p_id TEXT, p_password_hash TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_is_admin BOOLEAN := public.is_site_admin();
+BEGIN
+  DELETE FROM public.board_private_inquiries
+  WHERE id = p_id AND (v_is_admin OR password_hash = trim(COALESCE(p_password_hash, '')));
+  RETURN FOUND;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.delete_private_inquiry_with_password(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.delete_private_inquiry_with_password(TEXT, TEXT) TO anon, authenticated;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('foodhome-media', 'foodhome-media', true)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Public can view foodhome media'
+  ) THEN
+    CREATE POLICY "Public can view foodhome media"
+      ON storage.objects FOR SELECT TO public USING (bucket_id = 'foodhome-media');
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Admins can upload foodhome media'
+  ) THEN
+    CREATE POLICY "Admins can upload foodhome media"
+      ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'foodhome-media' AND public.is_site_admin());
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Admins can update foodhome media'
+  ) THEN
+    CREATE POLICY "Admins can update foodhome media"
+      ON storage.objects FOR UPDATE TO authenticated
+      USING (bucket_id = 'foodhome-media' AND public.is_site_admin())
+      WITH CHECK (bucket_id = 'foodhome-media' AND public.is_site_admin());
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Admins can delete foodhome media'
+  ) THEN
+    CREATE POLICY "Admins can delete foodhome media"
+      ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'foodhome-media' AND public.is_site_admin());
   END IF;
 END
 $$;

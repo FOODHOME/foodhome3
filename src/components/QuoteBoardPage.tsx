@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { QuoteInquiry } from '../types';
 import { 
@@ -28,7 +28,10 @@ import {
   Building,
   Mail,
   Package,
-  Layers
+  Layers,
+  Edit3,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 
 interface QuoteBoardPageProps {
@@ -43,10 +46,18 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
     updateQuoteStatus, 
     deleteQuoteInquiry,
     isAdminLoggedIn, 
-    verifyQuotePassword, 
+    unlockQuotePost,
+    updateQuoteByVisitor,
+    deleteQuoteByVisitor,
+    refreshBoardsFromSupabase,
+    isBoardSyncing,
     showToast,
     setActivePage
   } = useApp();
+
+  useEffect(() => {
+    refreshBoardsFromSupabase();
+  }, [refreshBoardsFromSupabase]);
 
   const [viewMode, setViewMode] = useState<'list' | 'write' | 'detail'>(initialViewMode);
   const [selectedQuote, setSelectedQuote] = useState<QuoteInquiry | null>(null);
@@ -57,6 +68,13 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [unlockedPasswordHash, setUnlockedPasswordHash] = useState<string | null>(null);
+
+  // Visitor Edit State
+  const [isEditingQuote, setIsEditingQuote] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editMessage, setEditMessage] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -115,6 +133,9 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
   };
 
   const handleRowClick = (quote: QuoteInquiry) => {
+    setIsEditingQuote(false);
+    setUnlockedPasswordHash(null);
+
     if (isAdminLoggedIn) {
       setSelectedQuote(quote);
       setViewMode('detail');
@@ -138,45 +159,93 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
     }
 
     setIsVerifying(true);
-    const isValid = await verifyQuotePassword(quoteToUnlock.id, enteredPassword);
+    const res = await unlockQuotePost(quoteToUnlock.id, enteredPassword);
     setIsVerifying(false);
 
-    if (isValid) {
+    if (res.verified && res.quote) {
       setPasswordModalOpen(false);
-      setSelectedQuote(quoteToUnlock);
+      setUnlockedPasswordHash(res.passwordHash || null);
+      setSelectedQuote(res.quote);
       setViewMode('detail');
       setPasswordError(null);
     } else {
-      setPasswordError('비밀번호가 일치하지 않습니다. 다시 확인해 주세요.');
+      setPasswordError(res.error || '비밀번호가 일치하지 않습니다. 다시 확인해 주세요.');
+    }
+  };
+
+  const handleSaveEditQuote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedQuote || !unlockedPasswordHash) return;
+    if (!editTitle.trim()) {
+      showToast('상담 제목을 입력해 주세요.');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    const res = await updateQuoteByVisitor(
+      selectedQuote.id,
+      unlockedPasswordHash,
+      editTitle.trim(),
+      editMessage.trim()
+    );
+    setIsSavingEdit(false);
+
+    if (res.success) {
+      setSelectedQuote(prev => (prev ? { ...prev, title: editTitle.trim(), message: editMessage.trim() } : null));
+      setIsEditingQuote(false);
+    } else {
+      showToast(res.error || '수정에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteCurrentQuote = async () => {
+    if (!selectedQuote) return;
+    if (!window.confirm('정말 이 견적 상담글을 삭제하시겠습니까?')) return;
+
+    if (isAdminLoggedIn && !unlockedPasswordHash) {
+      deleteQuoteInquiry(selectedQuote.id);
+      setSelectedQuote(null);
+      setViewMode('list');
+      return;
+    }
+
+    if (!unlockedPasswordHash) return;
+    const res = await deleteQuoteByVisitor(selectedQuote.id, unlockedPasswordHash);
+    if (res.success) {
+      setSelectedQuote(null);
+      setUnlockedPasswordHash(null);
+      setViewMode('list');
+    } else {
+      showToast(res.error || '삭제 권한이 없습니다.');
     }
   };
 
   const handleWriteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim()) {
-      alert('상담 제목을 입력해 주세요.');
+      showToast('상담 제목을 입력해 주세요.');
       return;
     }
     if (!formData.companyName.trim()) {
-      alert('업체명 / 상호명을 입력해 주세요.');
+      showToast('업체명 / 상호명을 입력해 주세요.');
       return;
     }
     if (!formData.contactPerson.trim()) {
-      alert('담당자 성함을 입력해 주세요.');
+      showToast('담당자 성함을 입력해 주세요.');
       return;
     }
     if (!formData.phone.trim()) {
-      alert('연락처를 입력해 주세요.');
+      showToast('연락처를 입력해 주세요.');
       return;
     }
 
     if (!formData.password || formData.password.length < 4) {
-      alert('게시글 조회를 위한 비밀번호 4자리 이상을 입력해 주세요.');
+      showToast('게시글 조회를 위한 비밀번호 4자리 이상을 입력해 주세요.');
       return;
     }
 
     if (!formData.agreedPrivacy) {
-      alert('개인정보 수집 및 이용에 동의해 주셔야 상담 신청이 완료됩니다.');
+      showToast('개인정보 수집 및 이용에 동의해 주셔야 상담 신청이 완료됩니다.');
       return;
     }
 
@@ -402,23 +471,34 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
               </div>
 
               {/* Search Input */}
-              <div className="relative w-full sm:w-64">
-                <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="제목, 상호명 검색"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-stone-200 text-xs focus:outline-none focus:border-[#872D35] bg-stone-50"
-                />
-                {searchTerm && (
-                  <button
-                    onClick={() => setSearchTerm('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 p-0.5"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="제목, 상호명 검색"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-stone-200 text-xs focus:outline-none focus:border-[#872D35] bg-stone-50"
+                  />
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => refreshBoardsFromSupabase()}
+                  disabled={isBoardSyncing}
+                  className="p-2 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-600 cursor-pointer disabled:opacity-50"
+                  title="최신 견적 상담 목록 새로고침"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isBoardSyncing ? 'animate-spin' : ''}`} />
+                </button>
               </div>
             </div>
 
@@ -885,13 +965,80 @@ export const QuoteBoardPage: React.FC<QuoteBoardPageProps> = ({ initialViewMode 
               </div>
             </div>
 
-            {/* Message Body */}
-            <div>
-              <span className="text-xs font-bold text-stone-700 block mb-2">상담 내용</span>
-              <div className="p-5 rounded-2xl bg-white border border-stone-200 text-stone-800 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
-                {selectedQuote.message || '상세 상담 내용이 없습니다.'}
+            {/* Message Body & Author Controls */}
+            {isEditingQuote ? (
+              <form onSubmit={handleSaveEditQuote} className="space-y-3 bg-stone-50 p-4 rounded-2xl border border-stone-200">
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">상담 제목 수정</label>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs sm:text-sm bg-white focus:outline-none focus:border-[#872D35]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">상담 내용 수정</label>
+                  <textarea
+                    rows={4}
+                    value={editMessage}
+                    onChange={(e) => setEditMessage(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-stone-300 text-xs sm:text-sm bg-white focus:outline-none focus:border-[#872D35]"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingQuote(false)}
+                    className="px-3.5 py-1.5 rounded-lg border border-stone-300 bg-white text-xs font-bold text-stone-700 cursor-pointer"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingEdit}
+                    className="px-4 py-1.5 rounded-lg bg-[#872D35] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {isSavingEdit ? '저장 중...' : '수정 저장'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-stone-700">상담 내용</span>
+                  {(unlockedPasswordHash || isAdminLoggedIn) && (
+                    <div className="flex items-center gap-1.5">
+                      {unlockedPasswordHash && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditTitle(selectedQuote.title || '');
+                            setEditMessage(selectedQuote.message || '');
+                            setIsEditingQuote(true);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>수정</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleDeleteCurrentQuote}
+                        className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>삭제</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="p-5 rounded-2xl bg-white border border-stone-200 text-stone-800 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
+                  {selectedQuote.message || '상세 상담 내용이 없습니다.'}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Attachments */}
             {selectedQuote.attachments && selectedQuote.attachments.length > 0 && (
