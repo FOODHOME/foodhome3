@@ -26,6 +26,7 @@ import { getDefaultPageSections } from '../data/defaultPageSections';
 import { 
   getSupabaseClient, 
   getSavedSupabaseConfig, 
+  loadPublicRuntimeSupabaseConfig,
   saveSupabaseConfig, 
   isSiteAdmin,
   hashPassword,
@@ -570,6 +571,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (!client) {
+        const runtimeCfg = await loadPublicRuntimeSupabaseConfig();
+        if (cancelled) return;
+        if (
+          runtimeCfg &&
+          runtimeCfg.url &&
+          runtimeCfg.anonKey &&
+          (runtimeCfg.url !== supabaseConfig.url || runtimeCfg.anonKey !== supabaseConfig.anonKey)
+        ) {
+          setSupabaseConfig(runtimeCfg);
+          return;
+        }
         setIsSupabaseAdminAuthed(false);
         setSupabaseAdminEmail(null);
         setRemoteSiteContentsInfo(null);
@@ -629,7 +641,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setLastSupabaseSyncError(null);
       setRemoteSiteContentsInfo({ exists: res.exists, updatedAt: res.updatedAt });
       if (res.updatedAt) {
-        setLastSupabasePublishAt(prev => prev || res.updatedAt);
+        setLastSupabasePublishAt(res.updatedAt);
       }
 
       // 3. Apply remote public payload ONLY for regular visitors (never overwrite active admin edits!)
@@ -1257,9 +1269,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateSupabaseConfig = (cfg: SupabaseConfig) => {
-    saveSupabaseConfig(cfg);
-    setSupabaseConfig(cfg);
-    showToast('Supabase 연결 설정이 저장되었습니다.');
+    try {
+      saveSupabaseConfig(cfg);
+      setSupabaseConfig({ url: cfg.url.trim().replace(/\/+$/, ''), anonKey: cfg.anonKey.trim() });
+      showToast('Supabase 연결 설정이 저장되었습니다.');
+    } catch (e: any) {
+      showToast(e?.message || 'Supabase 설정 저장에 실패했습니다.');
+    }
   };
 
   const publishPublicContentsToSupabase = async (): Promise<{ success: boolean; updatedAt?: string; error?: string }> => {

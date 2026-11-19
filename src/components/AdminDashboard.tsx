@@ -4,7 +4,7 @@ import { ProductItem, PostItem, B2BInquiry, NavMenuItem, NavSubmenuItem } from '
 import { initialData } from '../data/initialData';
 import { FoodhomeLogo } from './FoodhomeLogo';
 import { submitToFormspree } from '../utils/formspree';
-import { getSupabaseClient, isSiteAdmin, SITE_CONTENTS_ROW_ID, uploadImageToStorage } from '../lib/supabase';
+import { getSupabaseClient, getSupabaseConnectionDiagnostics, isServiceRoleJwt, isSiteAdmin, SITE_CONTENTS_ROW_ID, uploadImageToStorage } from '../lib/supabase';
 import { MainBannerManager } from './admin/MainBannerManager';
 import { QuoteInquiriesManager } from './admin/QuoteInquiriesManager';
 import { ContentManager } from './admin/ContentManager';
@@ -521,6 +521,10 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleSaveSupabase = () => {
+    if (isServiceRoleJwt(supabaseKeyInput.trim())) {
+      setSupabaseStatusResult('보안 오류: service_role 키는 프론트엔드에 입력할 수 없습니다. anon public key를 입력해 주세요.');
+      return;
+    }
     updateSupabaseConfig({
       url: supabaseUrlInput.trim(),
       anonKey: supabaseKeyInput.trim()
@@ -531,6 +535,10 @@ export const AdminDashboard: React.FC = () => {
   const handleTestSupabaseConnection = async () => {
     if (!supabaseUrlInput.trim() || !supabaseKeyInput.trim()) {
       setSupabaseStatusResult('URL 및 Anon Key를 모두 입력해 주세요.');
+      return;
+    }
+    if (isServiceRoleJwt(supabaseKeyInput.trim())) {
+      setSupabaseStatusResult('보안 오류: service_role 키는 프론트엔드에 입력할 수 없습니다. anon public key를 입력해 주세요.');
       return;
     }
     setIsTestingSupabase(true);
@@ -1243,6 +1251,58 @@ export const AdminDashboard: React.FC = () => {
                     {supabaseStatusResult}
                   </div>
                 )}
+
+                {(() => {
+                  const diag = getSupabaseConnectionDiagnostics();
+                  if (!supabaseConfig.url || !supabaseConfig.anonKey || diag.hasPublicBuildConfig) return null;
+                  return (
+                    <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 space-y-2">
+                      <p className="font-extrabold flex items-center gap-1.5 text-amber-900">
+                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>다른 브라우저·기기(일반 방문자) 동기화 안내</span>
+                      </p>
+                      <p className="text-[11px] leading-relaxed text-amber-900">
+                        현재 Supabase 연결 정보(URL / Anon Key)가 <strong>이 브라우저(localStorage)에만 저장</strong>되어 있어, 다른 기기나 시크릿 창으로 접속하는 일반 방문자는 Supabase를 자동 조회할 수 없습니다.
+                        GitHub Pages 등 공개 배포 시 아래 두 방법 중 하나를 적용해 주세요.
+                      </p>
+                      <ul className="text-[11px] list-disc list-inside space-y-0.5 text-amber-900">
+                        <li>
+                          <strong>GitHub Actions 배포</strong>: 저장소 <code className="font-mono">Settings → Secrets and variables → Actions → Variables</code>에 <code className="font-mono">VITE_SUPABASE_URL</code>, <code className="font-mono">VITE_SUPABASE_ANON_KEY</code> 추가
+                        </li>
+                        <li>
+                          <strong>정적 /docs 폴더 배포</strong>: 아래 버튼으로 <code className="font-mono">supabase-config.json</code>을 내려받아 저장소의 <code className="font-mono">public/supabase-config.json</code> 및 <code className="font-mono">docs/supabase-config.json</code>에 반영
+                        </li>
+                      </ul>
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cfgJson = JSON.stringify(
+                              {
+                                url: supabaseConfig.url,
+                                anonKey: supabaseConfig.anonKey
+                              },
+                              null,
+                              2
+                            );
+                            const href = 'data:application/json;charset=utf-8,' + encodeURIComponent(cfgJson);
+                            const a = document.createElement('a');
+                            a.setAttribute('href', href);
+                            a.setAttribute('download', 'supabase-config.json');
+                            document.body.appendChild(a);
+                            a.click();
+                            a.remove();
+                            showToast('supabase-config.json 파일이 다운로드되었습니다.');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-white border border-amber-300 hover:bg-amber-100 text-[11px] font-bold text-amber-950 inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>GitHub Pages용 supabase-config.json 다운로드</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
                   <p className="text-[11px] text-slate-500">

@@ -17,6 +17,26 @@ function normalizeSupabaseUrl(rawUrl: string): string {
   return (rawUrl || '').trim().replace(/\/+$/, '');
 }
 
+export function isServiceRoleJwt(key: string): boolean {
+  try {
+    const parts = (key || '').trim().split('.');
+    if (parts.length !== 3) return false;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const decoded =
+      typeof atob === 'function'
+        ? atob(padded)
+        : Buffer.from(padded, 'base64').toString('utf-8');
+    const parsed = JSON.parse(decoded);
+    return parsed?.role === 'service_role';
+  } catch {
+    return false;
+  }
+}
+
+let runtimePublicSupabaseConfig: SupabaseConfig | null = null;
+let runtimePublicConfigPromise: Promise<SupabaseConfig | null> | null = null;
+
 export function getSavedSupabaseConfig(): SupabaseConfig {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -25,7 +45,7 @@ export function getSavedSupabaseConfig(): SupabaseConfig {
         const parsed = JSON.parse(saved);
         const url = normalizeSupabaseUrl(parsed?.url || '');
         const anonKey = (parsed?.anonKey || '').trim();
-        if (url && anonKey) {
+        if (url && anonKey && !isServiceRoleJwt(anonKey)) {
           return { url, anonKey };
         }
       }
@@ -33,19 +53,78 @@ export function getSavedSupabaseConfig(): SupabaseConfig {
   } catch (e) {
     console.warn('Failed to parse saved supabase config:', e);
   }
+
+  const envUrl = normalizeSupabaseUrl(DEFAULT_SUPABASE_URL);
+  const envKey = (DEFAULT_SUPABASE_ANON_KEY || '').trim();
+  if (envUrl && envKey && !isServiceRoleJwt(envKey)) {
+    return { url: envUrl, anonKey: envKey };
+  }
+
+  if (runtimePublicSupabaseConfig?.url && runtimePublicSupabaseConfig?.anonKey) {
+    return runtimePublicSupabaseConfig;
+  }
+
   return {
-    url: normalizeSupabaseUrl(DEFAULT_SUPABASE_URL),
-    anonKey: (DEFAULT_SUPABASE_ANON_KEY || '').trim()
+    url: envUrl || runtimePublicSupabaseConfig?.url || '',
+    anonKey: envKey || runtimePublicSupabaseConfig?.anonKey || ''
   };
+}
+
+/**
+ * Loads public runtime Supabase config (`./supabase-config.json`) when build-time
+ * VITE_SUPABASE_* env vars are absent (e.g. GitHub Pages `/docs` static deployments).
+ */
+export async function loadPublicRuntimeSupabaseConfig(): Promise<SupabaseConfig | null> {
+  if (runtimePublicSupabaseConfig?.url && runtimePublicSupabaseConfig?.anonKey) {
+    return runtimePublicSupabaseConfig;
+  }
+
+  const envUrl = normalizeSupabaseUrl(DEFAULT_SUPABASE_URL);
+  const envKey = (DEFAULT_SUPABASE_ANON_KEY || '').trim();
+  if (envUrl && envKey) {
+    return { url: envUrl, anonKey: envKey };
+  }
+
+  if (typeof window === 'undefined' || typeof fetch !== 'function') {
+    return null;
+  }
+
+  if (!runtimePublicConfigPromise) {
+    runtimePublicConfigPromise = (async () => {
+      try {
+        const res = await fetch('./supabase-config.json', { cache: 'no-store' });
+        if (!res.ok) return null;
+        const json = await res.json();
+        const url = normalizeSupabaseUrl(json?.url || '');
+        const anonKey = (json?.anonKey || '').trim();
+        if (
+          url &&
+          anonKey &&
+          !url.includes('your-project') &&
+          !anonKey.includes('your-anon-key') &&
+          !isServiceRoleJwt(anonKey)
+        ) {
+          runtimePublicSupabaseConfig = { url, anonKey };
+          return runtimePublicSupabaseConfig;
+        }
+      } catch {
+        // Optional static config absent or invalid; ignore safely
+      }
+      return null;
+    })();
+  }
+
+  return runtimePublicConfigPromise;
 }
 
 export interface SupabaseConnectionDiagnostics {
   activeUrl: string;
   recoverEndpoint: string;
-  source: 'localStorage' | 'env' | 'none';
+  source: 'localStorage' | 'env' | 'runtimeJson' | 'none';
   envUrl: string;
   localStorageUrl: string;
   hasEnvConflict: boolean;
+  hasPublicBuildConfig: boolean;
 }
 
 export function getSupabaseConnectionDiagnostics(): SupabaseConnectionDiagnostics {
@@ -65,10 +144,27 @@ export function getSupabaseConnectionDiagnostics(): SupabaseConnectionDiagnostic
     }
   } catch {}
 
-  const hasLocal = Boolean(localStorageUrl && localStorageKey);
-  const hasEnv = Boolean(envUrl && envKey);
-  const activeUrl = hasLocal ? localStorageUrl : hasEnv ? envUrl : '';
-  const source: SupabaseConnectionDiagnostics['source'] = hasLocal ? 'localStorage' : hasEnv ? 'env' : 'none';
+  const hasLocal = Boolean(localStorageUrl && localStorageKey && !isServiceRoleJwt(localStorageKey));
+  const hasEnv = Boolean(envUrl && envKey && !isServiceRoleJwt(envKey));
+  const hasRuntimeJson = Boolean(
+    runtimePublicSupabaseConfig?.url &&
+      runtimePublicSupabaseConfig?.anonKey &&
+      !isServiceRoleJwt(runtimePublicSupabaseConfig.anonKey)
+  );
+  const activeUrl = hasLocal
+    ? localStorageUrl
+    : hasEnv
+    ? envUrl
+    : hasRuntimeJson
+    ? runtimePublicSupabaseConfig!.url
+    : '';
+  const source: SupabaseConnectionDiagnostics['source'] = hasLocal
+    ? 'localStorage'
+    : hasEnv
+    ? 'env'
+    : hasRuntimeJson
+    ? 'runtimeJson'
+    : 'none';
   const hasEnvConflict = Boolean(hasLocal && hasEnv && localStorageUrl !== envUrl);
 
   return {
@@ -77,18 +173,23 @@ export function getSupabaseConnectionDiagnostics(): SupabaseConnectionDiagnostic
     source,
     envUrl,
     localStorageUrl,
-    hasEnvConflict
+    hasEnvConflict,
+    hasPublicBuildConfig: hasEnv || hasRuntimeJson
   };
 }
 
 export function saveSupabaseConfig(config: SupabaseConfig): void {
+  const cleanKey = (config.anonKey || '').trim();
+  if (isServiceRoleJwt(cleanKey)) {
+    throw new Error('service_role 키는 보안상 프론트엔드에 저장할 수 없습니다. anon public key를 입력해 주세요.');
+  }
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       window.localStorage.setItem(
         STORAGE_SUPABASE_CONFIG_KEY,
         JSON.stringify({
           url: normalizeSupabaseUrl(config.url),
-          anonKey: (config.anonKey || '').trim()
+          anonKey: cleanKey
         })
       );
     }
@@ -890,11 +991,20 @@ export function extractPublicSitePayload(state: AppState): PublicSitePayload {
  * Returns null if the payload is empty or invalid.
  */
 export function sanitizeIncomingPublicPayload(raw: unknown): Partial<PublicSitePayload> | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+  let target = raw;
+  if (typeof target === 'string') {
+    try {
+      target = JSON.parse(target);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!target || typeof target !== 'object' || Array.isArray(target)) {
     return null;
   }
 
-  const source = raw as Record<string, unknown>;
+  const source = target as Record<string, unknown>;
   const sanitized: Partial<PublicSitePayload> = {};
   let hasValidKey = false;
 
@@ -918,9 +1028,95 @@ export interface FetchPublicSiteContentsResult {
 
 /**
  * Fetch public homepage contents from Supabase `site_contents` (`main_contents`).
+ * Uses cache-busted anonymous public access so unauthenticated visitors across all
+ * browsers/devices (and GitHub Pages) always receive the latest published content
+ * without being blocked by stale HTTP caches or expired local Auth JWTs.
  * Never throws or wipes local data on failure.
  */
-export async function fetchPublicSiteContents(): Promise<FetchPublicSiteContentsResult> {
+export async function fetchPublicSiteContents(
+  configOverride?: SupabaseConfig
+): Promise<FetchPublicSiteContentsResult> {
+  const cfg = configOverride?.url && configOverride?.anonKey ? configOverride : getSavedSupabaseConfig();
+  const activeUrl = normalizeSupabaseUrl(cfg.url || '');
+  const activeKey = (cfg.anonKey || '').trim();
+
+  if (!activeUrl || !activeKey) {
+    return {
+      ok: false,
+      exists: false,
+      payload: null,
+      updatedAt: null,
+      error: 'Supabase 연결 정보가 설정되지 않았습니다.'
+    };
+  }
+
+  // 1. Direct anonymous REST fetch with cache: 'no-store' (bypasses stale caches & expired user JWTs)
+  if (typeof fetch === 'function') {
+    try {
+      const endpoint = `${activeUrl}/rest/v1/site_contents?select=id,payload,updated_at&id=eq.${encodeURIComponent(SITE_CONTENTS_ROW_ID)}&limit=1`;
+      const resp = await fetch(endpoint, {
+        method: 'GET',
+        headers: {
+          apikey: activeKey,
+          Authorization: `Bearer ${activeKey}`,
+          Accept: 'application/json'
+        },
+        cache: 'no-store'
+      });
+
+      if (resp.ok) {
+        const rows = await resp.json();
+        const row = Array.isArray(rows) ? rows[0] : rows;
+        if (!row) {
+          return {
+            ok: true,
+            exists: false,
+            payload: null,
+            updatedAt: null
+          };
+        }
+
+        const sanitized = sanitizeIncomingPublicPayload(row.payload);
+        if (!sanitized) {
+          return {
+            ok: true,
+            exists: false,
+            payload: null,
+            updatedAt: row.updated_at || null
+          };
+        }
+
+        return {
+          ok: true,
+          exists: true,
+          payload: sanitized,
+          updatedAt: row.updated_at || null
+        };
+      }
+
+      // If PostgREST returned an explicit HTTP error, capture message before attempting client fallback
+      let restErrorMsg = `HTTP ${resp.status}`;
+      try {
+        const errBody = await resp.json();
+        if (errBody?.message) restErrorMsg = errBody.message;
+      } catch {}
+
+      const client = getSupabaseClient();
+      if (!client) {
+        return {
+          ok: false,
+          exists: false,
+          payload: null,
+          updatedAt: null,
+          error: restErrorMsg
+        };
+      }
+    } catch {
+      // Fall through to Supabase JS client fallback below
+    }
+  }
+
+  // 2. Fallback via Supabase JS client
   const client = getSupabaseClient();
   if (!client) {
     return {
@@ -928,7 +1124,7 @@ export async function fetchPublicSiteContents(): Promise<FetchPublicSiteContents
       exists: false,
       payload: null,
       updatedAt: null,
-      error: 'Supabase 연결 정보가 설정되지 않았습니다.'
+      error: 'Supabase 클라이언트 초기화에 실패했습니다.'
     };
   }
 
