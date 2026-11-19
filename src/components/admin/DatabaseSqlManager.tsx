@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { SUPABASE_FOODHOME_SETUP_SQL, getSupabaseClient } from '../../lib/supabase';
+import { SUPABASE_FOODHOME_SETUP_SQL, getSupabaseClient, isSiteAdmin, SITE_CONTENTS_ROW_ID } from '../../lib/supabase';
 import { Database, KeyRound, Copy, Check, ExternalLink, ShieldCheck, RefreshCw, AlertCircle } from 'lucide-react';
 
 export const DatabaseSqlManager: React.FC = () => {
@@ -38,12 +38,22 @@ export const DatabaseSqlManager: React.FC = () => {
         return;
       }
 
-      // Test a light ping query
-      const { data, error } = await client.from('site_admins').select('count', { count: 'exact', head: true });
-      if (error && error.code !== 'PGRST116') {
-        setTestResult(`연결 확인됨 (알림: ${error.message}). 데이터베이스 테이블을 생성하기 위해 아래 SQL 스크립트를 실행해 주세요.`);
+      // Test light ping query against public site_contents table
+      const { data, error } = await client
+        .from('site_contents')
+        .select('id, updated_at')
+        .eq('id', SITE_CONTENTS_ROW_ID)
+        .maybeSingle();
+
+      if (error) {
+        setTestResult(`연결 확인됨 (알림: ${error.message}). site_contents 테이블 생성을 위해 아래 SQL 스크립트를 실행해 주세요.`);
       } else {
-        setTestResult('Supabase 데이터베이스 연결 성공! 테이블 및 RLS 정책이 정상 작동 중입니다.');
+        const { data: sessionData } = await client.auth.getSession();
+        const authUser = sessionData?.session?.user;
+        const adminOk = authUser ? await isSiteAdmin(authUser.id) : false;
+        const rowInfo = data ? '게시 데이터 확인됨' : '테이블 정상 (아직 게시 전)';
+        const authInfo = adminOk ? '관리자 Auth 인증됨' : '로컬 로그인 상태 (게시는 이메일 로그인 필요)';
+        setTestResult(`Supabase 데이터베이스 연결 성공! (${rowInfo} / ${authInfo})`);
       }
     } catch (e: any) {
       setTestResult(`연결 오류: ${e?.message || '네트워크 상태를 확인해 주세요.'}`);
@@ -171,7 +181,7 @@ export const DatabaseSqlManager: React.FC = () => {
               <span>Supabase 실행용 SQL 마이그레이션 스크립트</span>
             </h4>
             <p className="text-[11px] text-stone-500 mt-0.5">
-              기존 테이블을 보존하며 필요한 견적상담(quote_inquiries), RLS 정책, 스토리지 버킷을 자동 생성합니다.
+              기존 테이블(site_admins, form_definitions, form_submissions)을 보존하며 홈페이지 공개 콘텐츠(site_contents) 테이블과 RLS 정책만 안전하게 생성합니다.
             </p>
           </div>
 

@@ -26,7 +26,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
   private handleResetCache = () => {
     try {
-      localStorage.clear();
       sessionStorage.clear();
     } catch {
       //
@@ -48,7 +47,7 @@ export class ErrorBoundary extends Component<Props, State> {
             </h2>
 
             <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-              이전 버전의 브라우저 캐시 데이터와 충돌했거나 일시적인 오류일 수 있습니다. 아래 버튼을 눌러 데이터를 초기화하고 다시 시작해 보세요.
+              일시적인 화면 렌더링 오류일 수 있습니다. 저장된 홈페이지 데이터는 보존되며, 세션을 초기화해 다시 시작할 수 있습니다.
             </p>
 
             {this.state.error?.message && (
@@ -69,7 +68,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>캐시 초기화 후 재시작</span>
+                <span>세션 초기화 후 재시작</span>
               </button>
             </div>
           </div>

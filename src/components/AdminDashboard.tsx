@@ -4,7 +4,7 @@ import { ProductItem, PostItem, B2BInquiry, NavMenuItem, NavSubmenuItem } from '
 import { initialData } from '../data/initialData';
 import { FoodhomeLogo } from './FoodhomeLogo';
 import { submitToFormspree } from '../utils/formspree';
-import { getSupabaseClient, uploadImageToStorage } from '../lib/supabase';
+import { getSupabaseClient, isSiteAdmin, SITE_CONTENTS_ROW_ID, uploadImageToStorage } from '../lib/supabase';
 import { MainBannerManager } from './admin/MainBannerManager';
 import { QuoteInquiriesManager } from './admin/QuoteInquiriesManager';
 import { ContentManager } from './admin/ContentManager';
@@ -95,6 +95,16 @@ export const AdminDashboard: React.FC = () => {
     showToast,
     supabaseConfig,
     updateSupabaseConfig,
+    isSupabaseAdminAuthed,
+    supabaseAdminEmail,
+    isPublishingToSupabase,
+    isSyncingFromSupabase,
+    hasUnpublishedChanges,
+    lastSupabasePublishAt,
+    lastSupabaseSyncError,
+    remoteSiteContentsInfo,
+    publishPublicContentsToSupabase,
+    pullPublicContentsFromSupabase,
     handleAdminLogout
   } = useApp();
 
@@ -532,19 +542,34 @@ export const AdminDashboard: React.FC = () => {
         return;
       }
 
-      // Check form_submissions table
+      // 1. Check public site_contents table (accessible for public SELECT under Phase 1 RLS)
       const { data, error } = await client
-        .from('form_submissions')
-        .select('id')
-        .limit(1);
+        .from('site_contents')
+        .select('id, updated_at')
+        .eq('id', SITE_CONTENTS_ROW_ID)
+        .maybeSingle();
+
+      if (error) {
+        setIsTestingSupabase(false);
+        setSupabaseStatusResult(`연결 확인됨 (site_contents 테이블 확인 필요: ${error.message})`);
+        return;
+      }
+
+      // 2. Check current Supabase Auth & site_admins status
+      const { data: sessionData } = await client.auth.getSession();
+      const authUser = sessionData?.session?.user;
+      const adminOk = authUser ? await isSiteAdmin(authUser.id) : false;
 
       setIsTestingSupabase(false);
-      if (error) {
-        setSupabaseStatusResult(`연결 응답 수신됨 (테이블 생성 또는 RLS 권한 확인 필요): ${error.message}`);
-      } else {
-        setSupabaseStatusResult('Supabase 연결 성공! form_submissions 테이블 통신이 정상적으로 확인되었습니다.');
-        showToast('Supabase 연결 테스트 성공!');
-      }
+      const rowMsg = data
+        ? `저장된 공개 콘텐츠(${SITE_CONTENTS_ROW_ID}) 확인됨`
+        : `테이블 정상 (아직 '${SITE_CONTENTS_ROW_ID}' 데이터 미게시 상태)`;
+      const authMsg = adminOk
+        ? `관리자 Auth 인증됨 (${authUser?.email || 'admin'})`
+        : '현재 로컬 로그인 상태 (DB 게시를 위해서는 관리자 이메일로 로그인 필요)';
+
+      setSupabaseStatusResult(`Supabase 연결 성공! ${rowMsg} / ${authMsg}`);
+      showToast('Supabase 연결 테스트 성공!');
     } catch (e: any) {
       setIsTestingSupabase(false);
       setSupabaseStatusResult(`연결 오류: ${e?.message || '네트워크 오류'}`);
@@ -694,6 +719,51 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
+            {supabaseConfig.url && supabaseConfig.anonKey ? (
+              <button
+                type="button"
+                disabled={isPublishingToSupabase}
+                onClick={async () => {
+                  const res = await publishPublicContentsToSupabase();
+                  if (!res.success && !isSupabaseAdminAuthed) {
+                    setActiveAdminTab('supabase');
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-xs ${
+                  hasUnpublishedChanges
+                    ? 'bg-[#872D35] hover:bg-[#A3343E] text-white'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+                title={
+                  isSupabaseAdminAuthed
+                    ? '수정한 공개 콘텐츠(회사소개·제품·배너·메뉴·후기 등)를 Supabase에 게시합니다'
+                    : 'Supabase 이메일 계정으로 로그인 후 DB에 게시할 수 있습니다'
+                }
+              >
+                {isPublishingToSupabase ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isPublishingToSupabase
+                    ? '게시 중...'
+                    : hasUnpublishedChanges
+                    ? 'Supabase 게시'
+                    : 'Supabase 동기화됨'}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setActiveAdminTab('supabase')}
+                className="px-3 py-1.5 rounded-lg bg-amber-600/20 border border-amber-400/40 text-amber-200 hover:bg-amber-600/30 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                title="Supabase 연결 설정으로 이동"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Supabase 미연결</span>
+              </button>
+            )}
             <button
               onClick={() => setIsAdminOpen(false)}
               className="px-3 py-1.5 rounded-lg bg-stone-800 text-xs font-bold text-stone-300 hover:text-white hover:bg-stone-700 transition-colors flex items-center gap-1 cursor-pointer"
@@ -1194,6 +1264,105 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
+              {/* Phase 1: Public Site Contents Sync Card */}
+              <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-2xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                      <Send className="w-4 h-4 text-[#872D35]" />
+                      <span>1차 홈페이지 공개 콘텐츠 동기화 (site_contents / main_contents)</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      회사소개, 배너, 제품, 공지·FAQ, 후기, 테마, SEO만 Supabase에 저장하며 고객 문의/견적 개인정보(inquiries, quotes)는 제외됩니다.
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-bold border shrink-0 ${
+                      isSupabaseAdminAuthed
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}
+                  >
+                    {isSupabaseAdminAuthed
+                      ? `Supabase 인증됨 (${supabaseAdminEmail || 'admin'})`
+                      : '로컬 로그인 상태 (DB 게시는 이메일 로그인 필요)'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-[11px] text-slate-500 block">원격 DB 상태</span>
+                    <strong className="text-slate-800">
+                      {remoteSiteContentsInfo?.exists
+                        ? '게시된 콘텐츠 있음'
+                        : supabaseConfig.url && supabaseConfig.anonKey
+                        ? '미게시 (로컬 데이터 보존 중)'
+                        : 'Supabase 미연결'}
+                    </strong>
+                  </div>
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-[11px] text-slate-500 block">최근 게시 시각</span>
+                    <strong className="text-slate-800">
+                      {lastSupabasePublishAt
+                        ? new Date(lastSupabasePublishAt).toLocaleString('ko-KR')
+                        : remoteSiteContentsInfo?.updatedAt
+                        ? new Date(remoteSiteContentsInfo.updatedAt).toLocaleString('ko-KR')
+                        : '기록 없음'}
+                    </strong>
+                  </div>
+                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <span className="text-[11px] text-slate-500 block">로컬 변경 상태</span>
+                    <strong className={hasUnpublishedChanges ? 'text-[#872D35]' : 'text-emerald-700'}>
+                      {hasUnpublishedChanges ? '게시 대기 변경사항 있음' : '최신 상태'}
+                    </strong>
+                  </div>
+                </div>
+
+                {lastSupabaseSyncError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs font-bold text-red-700">
+                    동기화 알림: {lastSupabaseSyncError}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={isSyncingFromSupabase || !supabaseConfig.url || !supabaseConfig.anonKey}
+                    onClick={async () => {
+                      if (
+                        window.confirm(
+                          'Supabase에 저장된 공개 콘텐츠를 현재 관리자 화면으로 불러오시겠습니까?\n(아직 게시하지 않은 로컬 수정사항이 있다면 덮어씌워질 수 있으며, 문의/견적 내역은 유지됩니다.)'
+                        )
+                      ) {
+                        await pullPublicContentsFromSupabase();
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSyncingFromSupabase ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    )}
+                    <span>Supabase에서 불러오기</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isPublishingToSupabase || !supabaseConfig.url || !supabaseConfig.anonKey}
+                    onClick={() => publishPublicContentsToSupabase()}
+                    className="px-5 py-2 rounded-lg bg-[#872D35] hover:bg-[#6E1D24] text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                  >
+                    {isPublishingToSupabase ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                    <span>현재 홈페이지 콘텐츠 Supabase에 게시</span>
+                  </button>
+                </div>
+              </div>
+
               {/* Required Supabase Tables Checklist */}
               <div className="bg-white p-6 rounded-xl border border-slate-200 space-y-4 shadow-2xs">
                 <h4 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
@@ -1204,31 +1373,31 @@ export const AdminDashboard: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-slate-800">site_admins</span>
-                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">인증 연동</span>
+                      <span className="font-mono font-bold text-slate-800">site_contents</span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">1차 연동</span>
                     </div>
                     <p className="text-slate-600 text-[11px] leading-relaxed">
-                      관리자 권한 및 역할 정의 테이블. <code className="text-[#872D35] font-bold">is_site_admin()</code> RPC 함수로 관리자 여부를 서버단에서 검증합니다.
+                      홈페이지 공개 콘텐츠(<code className="text-[#872D35] font-bold">main_contents</code>) 저장. 일반 방문자는 읽기 전용, <code className="text-[#872D35] font-bold">is_site_admin()</code> 관리자만 수정/게시 가능.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-slate-800">form_definitions</span>
-                      <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">동적 폼</span>
+                      <span className="font-mono font-bold text-slate-800">site_admins</span>
+                      <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">기존 유지</span>
                     </div>
                     <p className="text-slate-600 text-[11px] leading-relaxed">
-                      샘플신청 및 견적문의 신청서 양식의 입력 필드(항목명, 유형, 필수여부)를 동적으로 관리하는 스키마입니다.
+                      관리자 권한(<code className="text-[#872D35] font-bold">user_id, created_at</code>) 테이블. <code className="text-[#872D35] font-bold">is_site_admin()</code> RPC 함수로 서버단에서 검증합니다.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-mono font-bold text-slate-800">form_submissions</span>
-                      <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-bold">신청서 접수</span>
+                      <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-bold">비공개 분리</span>
                     </div>
                     <p className="text-slate-600 text-[11px] leading-relaxed">
-                      고객 샘플 신청 내역 저장 테이블. 개인정보는 관리자 외 전체 조회 불가하며, 고객은 4자리 비밀번호 검증으로 본인 글만 확인합니다.
+                      고객 샘플 신청 내역 테이블(개인정보 분리). 1차 공개 콘텐츠(<code className="font-mono">site_contents</code>)와 분리되어 기존 구조를 그대로 유지합니다.
                     </p>
                   </div>
                 </div>
@@ -1236,10 +1405,10 @@ export const AdminDashboard: React.FC = () => {
                 <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-1">
                   <p className="font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Supabase Edge Functions 및 RLS (Row Level Security) 원칙</span>
+                    <span>1차 안전 마이그레이션 및 개인정보 분리 원칙</span>
                   </p>
                   <p className="text-[11px] leading-relaxed text-blue-800">
-                    비밀번호 검증 및 개인정보 조회를 위해 서버리스 Edge Functions를 연동할 수 있도록 설계되어 있습니다. 현재 대시보드에서 등록된 모든 신청서는 안전하게 암호화되어 관리됩니다.
+                    관리자 페이지의 JSON 백업·로컬 저장소(foodhome_app_data_v4)는 그대로 유지되며, 고객 문의(inquiries)·견적(quotes)·비밀번호는 공개 테이블(site_contents)에 절대 저장되지 않습니다.
                   </p>
                 </div>
               </div>

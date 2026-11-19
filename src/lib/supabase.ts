@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { QuoteInquiry } from '../types';
+import { AppState, QuoteInquiry } from '../types';
 
 // Default Supabase config (can be configured via environment variables or in Admin settings)
 const DEFAULT_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -13,14 +13,20 @@ export interface SupabaseConfig {
   anonKey: string;
 }
 
+function normalizeSupabaseUrl(rawUrl: string): string {
+  return (rawUrl || '').trim().replace(/\/+$/, '');
+}
+
 export function getSavedSupabaseConfig(): SupabaseConfig {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       const saved = window.localStorage.getItem(STORAGE_SUPABASE_CONFIG_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.url && parsed.anonKey) {
-          return parsed;
+        const url = normalizeSupabaseUrl(parsed?.url || '');
+        const anonKey = (parsed?.anonKey || '').trim();
+        if (url && anonKey) {
+          return { url, anonKey };
         }
       }
     }
@@ -28,19 +34,295 @@ export function getSavedSupabaseConfig(): SupabaseConfig {
     console.warn('Failed to parse saved supabase config:', e);
   }
   return {
-    url: DEFAULT_SUPABASE_URL,
-    anonKey: DEFAULT_SUPABASE_ANON_KEY
+    url: normalizeSupabaseUrl(DEFAULT_SUPABASE_URL),
+    anonKey: (DEFAULT_SUPABASE_ANON_KEY || '').trim()
+  };
+}
+
+export interface SupabaseConnectionDiagnostics {
+  activeUrl: string;
+  recoverEndpoint: string;
+  source: 'localStorage' | 'env' | 'none';
+  envUrl: string;
+  localStorageUrl: string;
+  hasEnvConflict: boolean;
+}
+
+export function getSupabaseConnectionDiagnostics(): SupabaseConnectionDiagnostics {
+  const envUrl = normalizeSupabaseUrl(DEFAULT_SUPABASE_URL);
+  const envKey = (DEFAULT_SUPABASE_ANON_KEY || '').trim();
+  let localStorageUrl = '';
+  let localStorageKey = '';
+
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = window.localStorage.getItem(STORAGE_SUPABASE_CONFIG_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        localStorageUrl = normalizeSupabaseUrl(parsed?.url || '');
+        localStorageKey = (parsed?.anonKey || '').trim();
+      }
+    }
+  } catch {}
+
+  const hasLocal = Boolean(localStorageUrl && localStorageKey);
+  const hasEnv = Boolean(envUrl && envKey);
+  const activeUrl = hasLocal ? localStorageUrl : hasEnv ? envUrl : '';
+  const source: SupabaseConnectionDiagnostics['source'] = hasLocal ? 'localStorage' : hasEnv ? 'env' : 'none';
+  const hasEnvConflict = Boolean(hasLocal && hasEnv && localStorageUrl !== envUrl);
+
+  return {
+    activeUrl,
+    recoverEndpoint: activeUrl ? `${activeUrl}/auth/v1/recover` : '',
+    source,
+    envUrl,
+    localStorageUrl,
+    hasEnvConflict
   };
 }
 
 export function saveSupabaseConfig(config: SupabaseConfig): void {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(STORAGE_SUPABASE_CONFIG_KEY, JSON.stringify(config));
+      window.localStorage.setItem(
+        STORAGE_SUPABASE_CONFIG_KEY,
+        JSON.stringify({
+          url: normalizeSupabaseUrl(config.url),
+          anonKey: (config.anonKey || '').trim()
+        })
+      );
     }
   } catch (e) {
     console.warn('Failed to save supabase config:', e);
   }
+}
+
+export const PASSWORD_RECOVERY_STORAGE_KEY = 'foodhome_password_recovery_pending';
+export const PASSWORD_RECOVERY_EMAIL_KEY = 'foodhome_password_recovery_email';
+
+export type RecoveryFailureReason =
+  | 'otp_expired'
+  | 'access_denied'
+  | 'code_verifier_error'
+  | 'session_creation_failed'
+  | 'supabase_not_configured';
+
+export type OtpRecoveryErrorType =
+  | 'invalid_email_format'
+  | 'rate_limit_exceeded'
+  | 'invalid_otp'
+  | 'otp_expired'
+  | 'otp_already_used'
+  | 'supabase_connection_error'
+  | 'session_creation_failed'
+  | 'password_update_failed';
+
+export function isValidEmailFormat(email: string): boolean {
+  const trimmed = (email || '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
+
+export function isAuthCallbackHash(rawHash: string): boolean {
+  const clean = (rawHash || '').replace(/^#/, '');
+  if (!clean) return false;
+  return (
+    clean.includes('access_token=') ||
+    clean.includes('refresh_token=') ||
+    clean.includes('type=recovery') ||
+    clean.includes('error_description=') ||
+    (clean.includes('error=') && (clean.includes('error_code=') || clean.includes('access_denied')))
+  );
+}
+
+export interface AuthCallbackUrlInspection {
+  hasAuthParams: boolean;
+  isError: boolean;
+  errorCode: string | null;
+  errorParam: string | null;
+  errorDescription: string | null;
+  code: string | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  tokenHash: string | null;
+  type: string | null;
+  rawKey: string;
+}
+
+export function inspectAuthCallbackUrl(): AuthCallbackUrlInspection {
+  if (typeof window === 'undefined') {
+    return {
+      hasAuthParams: false,
+      isError: false,
+      errorCode: null,
+      errorParam: null,
+      errorDescription: null,
+      code: null,
+      accessToken: null,
+      refreshToken: null,
+      tokenHash: null,
+      type: null,
+      rawKey: ''
+    };
+  }
+
+  try {
+    const rawSearch = window.location.search || '';
+    const rawHash = (window.location.hash || '').replace(/^#/, '');
+    const searchParams = new URLSearchParams(rawSearch);
+    const hashParams = new URLSearchParams(rawHash.includes('=') ? rawHash : '');
+
+    const errorCode = hashParams.get('error_code') || searchParams.get('error_code');
+    const errorParam = hashParams.get('error') || searchParams.get('error');
+    const errorDescription = hashParams.get('error_description') || searchParams.get('error_description');
+    const code = searchParams.get('code') || hashParams.get('code');
+    const accessToken = hashParams.get('access_token');
+    const refreshToken = hashParams.get('refresh_token');
+    const tokenHash = searchParams.get('token_hash') || hashParams.get('token_hash');
+    const type = hashParams.get('type') || searchParams.get('type');
+
+    const isError = Boolean(
+      errorCode ||
+        errorDescription ||
+        (errorParam && (isAuthCallbackHash(window.location.hash) || searchParams.has('error')))
+    );
+
+    const hasAuthParams = Boolean(
+      isError ||
+        code ||
+        accessToken ||
+        (tokenHash && type === 'recovery') ||
+        (type === 'recovery' && isAuthCallbackHash(window.location.hash))
+    );
+
+    return {
+      hasAuthParams,
+      isError,
+      errorCode,
+      errorParam,
+      errorDescription,
+      code,
+      accessToken,
+      refreshToken,
+      tokenHash,
+      type,
+      rawKey: `${rawSearch}|${rawHash}`
+    };
+  } catch {
+    return {
+      hasAuthParams: false,
+      isError: false,
+      errorCode: null,
+      errorParam: null,
+      errorDescription: null,
+      code: null,
+      accessToken: null,
+      refreshToken: null,
+      tokenHash: null,
+      type: null,
+      rawKey: ''
+    };
+  }
+}
+
+export function setPasswordRecoveryPending(pending: boolean, email?: string | null): void {
+  try {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    if (pending) {
+      window.sessionStorage.setItem(PASSWORD_RECOVERY_STORAGE_KEY, 'true');
+      if (email) {
+        window.sessionStorage.setItem(PASSWORD_RECOVERY_EMAIL_KEY, email);
+      }
+    } else {
+      window.sessionStorage.removeItem(PASSWORD_RECOVERY_STORAGE_KEY);
+      window.sessionStorage.removeItem(PASSWORD_RECOVERY_EMAIL_KEY);
+    }
+  } catch {
+    //
+  }
+}
+
+export function getSavedRecoveryEmail(): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      return window.sessionStorage.getItem(PASSWORD_RECOVERY_EMAIL_KEY);
+    }
+  } catch {}
+  return null;
+}
+
+export function isPasswordRecoveryPending(): boolean {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      if (window.sessionStorage.getItem(PASSWORD_RECOVERY_STORAGE_KEY) === 'true') {
+        return true;
+      }
+    }
+  } catch {}
+  return false;
+}
+
+export function clearAuthUrlParams(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+
+    const authQueryKeys = ['code', 'flow_id', 'token_hash', 'type', 'error', 'error_code', 'error_description', 'sb'];
+    authQueryKeys.forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    });
+
+    if (isAuthCallbackHash(url.hash)) {
+      url.hash = '';
+      changed = true;
+    }
+
+    if (changed) {
+      const nextUrl = url.pathname + (url.searchParams.toString() ? `?${url.searchParams.toString()}` : '') + url.hash;
+      window.history.replaceState(null, '', nextUrl);
+    }
+  } catch {
+    //
+  }
+}
+
+/**
+ * Cleans up legacy link-callback URL parameters (e.g., #error=access_denied&error_code=otp_expired)
+ * without triggering link-based session exchange or verifyOtp().
+ */
+export function consumeLegacyAuthUrlNotice(): { detected: boolean; message: string | null } {
+  const inspected = inspectAuthCallbackUrl();
+  if (!inspected.hasAuthParams) {
+    return { detected: false, message: null };
+  }
+
+  clearAuthUrlParams();
+
+  if (inspected.isError) {
+    const code = (inspected.errorCode || '').toLowerCase();
+    const desc = (inspected.errorDescription || '').toLowerCase();
+    if (code.includes('otp_expired') || desc.includes('expired')) {
+      return {
+        detected: true,
+        message:
+          '기존 이메일 링크 인증이 만료되었거나 사용할 수 없습니다. 아래에서 이메일 인증번호(OTP)를 발송해 직접 입력해 주세요.'
+      };
+    }
+    return {
+      detected: true,
+      message:
+        '이메일 링크 인증을 처리할 수 없습니다. 아래에서 이메일 인증번호(OTP)를 발송해 비밀번호를 재설정해 주세요.'
+    };
+  }
+
+  return {
+    detected: true,
+    message:
+      '보안 정책상 이메일 인증번호(OTP) 직접 입력 방식으로 전환되었습니다. 아래에서 인증번호를 발송해 입력해 주세요.'
+  };
 }
 
 let cachedClient: SupabaseClient | null = null;
@@ -67,7 +349,10 @@ export function getSupabaseClient(): SupabaseClient | null {
     cachedClient = createClient(currentConfig.url, currentConfig.anonKey, {
       auth: {
         persistSession: true,
-        autoRefreshToken: true
+        autoRefreshToken: true,
+        // Disable automatic URL hash/query consumption to avoid hash-routing conflicts
+        // and duplicate recovery handling; password recovery uses manual verifyOtp().
+        detectSessionInUrl: false
       }
     });
     lastUsedConfig = currentConfig;
@@ -75,6 +360,437 @@ export function getSupabaseClient(): SupabaseClient | null {
   } catch (e) {
     console.error('Error creating Supabase client:', e);
     return null;
+  }
+}
+
+function isNetworkOrConnectionError(msg: string, name?: string): boolean {
+  const lower = (msg || '').toLowerCase();
+  const lowerName = (name || '').toLowerCase();
+  return (
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('network request failed') ||
+    lower.includes('load failed') ||
+    lower.includes('timeout') ||
+    lowerName.includes('fetch') ||
+    lowerName.includes('retryablefetcherror')
+  );
+}
+
+function extractWaitSeconds(msg: string, fallback = 60): number {
+  const match = (msg || '').match(/(\d+)\s*(?:second|sec|초)/i);
+  if (match && match[1]) {
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.min(Math.max(parsed, 15), 300);
+    }
+  }
+  return fallback;
+}
+
+export function classifyOtpSendError(err: {
+  code?: string | null;
+  message?: string | null;
+  name?: string | null;
+  status?: number | null;
+}): { errorType: OtpRecoveryErrorType; message: string; cooldownSeconds?: number } {
+  const code = (err.code || '').toLowerCase();
+  const msg = err.message || '';
+  const lowerMsg = msg.toLowerCase();
+  const status = err.status || 0;
+
+  if (isNetworkOrConnectionError(msg, err.name || undefined)) {
+    return {
+      errorType: 'supabase_connection_error',
+      message: 'Supabase 서버에 연결할 수 없습니다. 네트워크 상태 또는 Supabase 설정(URL / Anon Key)을 확인해 주세요.'
+    };
+  }
+
+  if (
+    status === 429 ||
+    code.includes('over_email_send_rate_limit') ||
+    code.includes('rate_limit') ||
+    lowerMsg.includes('rate limit') ||
+    lowerMsg.includes('too many requests') ||
+    lowerMsg.includes('security purposes') ||
+    lowerMsg.includes('only request this after')
+  ) {
+    const waitSec = extractWaitSeconds(msg, 60);
+    return {
+      errorType: 'rate_limit_exceeded',
+      cooldownSeconds: waitSec,
+      message: `이메일 발송 제한(rate limit)에 도달했습니다. 보안 정책상 약 ${waitSec}초 후 다시 시도해 주세요.`
+    };
+  }
+
+  if (
+    code.includes('validation_failed') ||
+    lowerMsg.includes('unable to validate email') ||
+    lowerMsg.includes('invalid email') ||
+    lowerMsg.includes('invalid format')
+  ) {
+    return {
+      errorType: 'invalid_email_format',
+      message: '이메일 주소 형식이 올바르지 않습니다. 정확한 관리자 이메일을 입력해 주세요.'
+    };
+  }
+
+  return {
+    errorType: 'supabase_connection_error',
+    message: msg
+      ? `인증번호 이메일 발송에 실패했습니다: ${msg}`
+      : '인증번호 이메일 발송 중 Supabase 연결 오류가 발생했습니다.'
+  };
+}
+
+export function classifyOtpVerifyError(err: {
+  code?: string | null;
+  message?: string | null;
+  name?: string | null;
+  status?: number | null;
+}): { errorType: OtpRecoveryErrorType; message: string } {
+  const code = (err.code || '').toLowerCase();
+  const msg = err.message || '';
+  const lowerMsg = msg.toLowerCase();
+
+  if (isNetworkOrConnectionError(msg, err.name || undefined)) {
+    return {
+      errorType: 'supabase_connection_error',
+      message: 'Supabase 서버와 통신할 수 없습니다. 인터넷 연결 또는 Supabase 연결 설정을 확인해 주세요.'
+    };
+  }
+
+  if (
+    lowerMsg.includes('already used') ||
+    lowerMsg.includes('already been used') ||
+    lowerMsg.includes('already verified') ||
+    lowerMsg.includes('consumed') ||
+    code.includes('already_used')
+  ) {
+    return {
+      errorType: 'otp_already_used',
+      message: '이미 사용된 인증번호입니다. "인증번호 재발송" 버튼으로 새 인증번호를 발급받아 주세요.'
+    };
+  }
+
+  if (
+    code.includes('otp_expired') ||
+    lowerMsg.includes('otp_expired') ||
+    (lowerMsg.includes('expired') && !lowerMsg.includes('invalid'))
+  ) {
+    return {
+      errorType: 'otp_expired',
+      message: '인증번호 유효시간이 만료되었습니다. "인증번호 재발송" 버튼을 눌러 새 인증번호를 받아 주세요.'
+    };
+  }
+
+  if (lowerMsg.includes('expired or is invalid') || lowerMsg.includes('has expired or is invalid')) {
+    return {
+      errorType: 'otp_expired',
+      message:
+        '인증번호가 만료되었거나 이미 사용되었거나 일치하지 않습니다. 최신 메일의 인증번호를 다시 확인하거나 "인증번호 재발송"을 눌러 주세요.'
+    };
+  }
+
+  if (
+    code.includes('otp_disabled') ||
+    code.includes('invalid') ||
+    lowerMsg.includes('invalid') ||
+    lowerMsg.includes('token') ||
+    lowerMsg.includes('otp') ||
+    lowerMsg.includes('mismatch') ||
+    lowerMsg.includes('incorrect')
+  ) {
+    return {
+      errorType: 'invalid_otp',
+      message: '잘못된 인증번호입니다. 이메일 본문에 표시된 숫자를 정확히 다시 입력해 주세요.'
+    };
+  }
+
+  return {
+    errorType: 'invalid_otp',
+    message: msg ? `인증번호 확인에 실패했습니다: ${msg}` : '인증번호 확인에 실패했습니다. 다시 시도해 주세요.'
+  };
+}
+
+export async function sendPasswordResetOtpEmail(
+  email: string
+): Promise<{
+  success: boolean;
+  cooldownSeconds?: number;
+  recoverEndpoint?: string;
+  errorType?: OtpRecoveryErrorType;
+  error?: string;
+}> {
+  const diagnostics = getSupabaseConnectionDiagnostics();
+  const recoverEndpoint = diagnostics.recoverEndpoint;
+  const trimmedEmail = (email || '').trim();
+  if (!isValidEmailFormat(trimmedEmail)) {
+    return {
+      success: false,
+      recoverEndpoint,
+      errorType: 'invalid_email_format',
+      error: '이메일 주소 형식이 올바르지 않습니다. (예: admin@example.com)'
+    };
+  }
+
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      recoverEndpoint,
+      errorType: 'supabase_connection_error',
+      error: 'Supabase 연결 설정(URL / Anon Key)이 필요합니다.'
+    };
+  }
+
+  try {
+    // Call resetPasswordForEmail(email) without redirectTo link dependency
+    // Sends POST ${activeUrl}/auth/v1/recover
+    const { error } = await client.auth.resetPasswordForEmail(trimmedEmail);
+
+    if (error) {
+      const classified = classifyOtpSendError({
+        code: (error as any)?.code || null,
+        message: error.message || '',
+        name: error.name || null,
+        status: (error as any)?.status || null
+      });
+      return {
+        success: false,
+        recoverEndpoint,
+        errorType: classified.errorType,
+        cooldownSeconds: classified.cooldownSeconds,
+        error: classified.message
+      };
+    }
+
+    return {
+      success: true,
+      recoverEndpoint,
+      cooldownSeconds: 60
+    };
+  } catch (e: any) {
+    const classified = classifyOtpSendError({
+      code: e?.code || null,
+      message: e?.message || '네트워크 오류가 발생했습니다.',
+      name: e?.name || null,
+      status: e?.status || null
+    });
+    return {
+      success: false,
+      recoverEndpoint,
+      errorType: classified.errorType,
+      cooldownSeconds: classified.cooldownSeconds,
+      error: classified.message
+    };
+  }
+}
+
+let inFlightOtpVerifyPromise: Promise<{
+  success: boolean;
+  email?: string;
+  errorType?: OtpRecoveryErrorType;
+  error?: string;
+}> | null = null;
+let manualOtpRecoveryActive = false;
+
+export function isManualOtpRecoveryActive(): boolean {
+  return manualOtpRecoveryActive;
+}
+
+/**
+ * Single authoritative verifyOtp() entry point for password recovery.
+ * Enforces in-flight deduplication and verifies session creation via getSession().
+ */
+export async function verifyPasswordRecoveryOtp(
+  email: string,
+  token: string
+): Promise<{
+  success: boolean;
+  email?: string;
+  errorType?: OtpRecoveryErrorType;
+  error?: string;
+}> {
+  if (inFlightOtpVerifyPromise) {
+    return inFlightOtpVerifyPromise;
+  }
+
+  const run = async (): Promise<{
+    success: boolean;
+    email?: string;
+    errorType?: OtpRecoveryErrorType;
+    error?: string;
+  }> => {
+    const trimmedEmail = (email || '').trim();
+    const trimmedToken = (token || '').trim();
+
+    if (!isValidEmailFormat(trimmedEmail)) {
+      return {
+        success: false,
+        errorType: 'invalid_email_format',
+        error: '이메일 주소 형식이 올바르지 않습니다.'
+      };
+    }
+
+    if (!trimmedToken) {
+      return {
+        success: false,
+        errorType: 'invalid_otp',
+        error: '이메일로 받은 인증번호를 입력해 주세요.'
+      };
+    }
+
+    const client = getSupabaseClient();
+    if (!client) {
+      return {
+        success: false,
+        errorType: 'supabase_connection_error',
+        error: 'Supabase 연결 설정(URL / Anon Key)이 확인되지 않습니다.'
+      };
+    }
+
+    manualOtpRecoveryActive = true;
+    try {
+      const { data, error } = await client.auth.verifyOtp({
+        email: trimmedEmail,
+        token: trimmedToken,
+        type: 'recovery'
+      });
+
+      if (error) {
+        const classified = classifyOtpVerifyError({
+          code: (error as any)?.code || null,
+          message: error.message || '',
+          name: error.name || null,
+          status: (error as any)?.status || null
+        });
+        return {
+          success: false,
+          errorType: classified.errorType,
+          error: classified.message
+        };
+      }
+
+      // Explicitly verify that an active Supabase Auth session was created
+      const { data: sessionData, error: sessionErr } = await client.auth.getSession();
+      const verifiedUser = sessionData?.session?.user || data?.session?.user;
+
+      if (sessionErr || !sessionData?.session || !verifiedUser) {
+        return {
+          success: false,
+          errorType: 'session_creation_failed',
+          error: '인증번호 확인 후 인증 세션을 생성하지 못했습니다. 인증번호를 다시 요청해 시도해 주세요.'
+        };
+      }
+
+      const verifiedEmail = verifiedUser.email || trimmedEmail;
+      setPasswordRecoveryPending(true, verifiedEmail);
+      return {
+        success: true,
+        email: verifiedEmail
+      };
+    } catch (e: any) {
+      const classified = classifyOtpVerifyError({
+        code: e?.code || null,
+        message: e?.message || '',
+        name: e?.name || null,
+        status: e?.status || null
+      });
+      return {
+        success: false,
+        errorType: classified.errorType,
+        error: classified.message
+      };
+    } finally {
+      manualOtpRecoveryActive = false;
+    }
+  };
+
+  inFlightOtpVerifyPromise = run().finally(() => {
+    inFlightOtpVerifyPromise = null;
+  });
+
+  return inFlightOtpVerifyPromise;
+}
+
+export async function updatePasswordInRecovery(newPassword: string): Promise<{
+  success: boolean;
+  errorType?: OtpRecoveryErrorType;
+  error?: string;
+}> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      errorType: 'supabase_connection_error',
+      error: 'Supabase 연결 설정(URL / Anon Key)이 확인되지 않습니다.'
+    };
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    return {
+      success: false,
+      errorType: 'password_update_failed',
+      error: '새 비밀번호는 최소 6자리 이상으로 입력해 주세요.'
+    };
+  }
+
+  try {
+    const { data: sessionData, error: sessionErr } = await client.auth.getSession();
+    if (sessionErr || !sessionData?.session?.user) {
+      return {
+        success: false,
+        errorType: 'session_creation_failed',
+        error: '비밀번호 재설정 인증 세션이 유효하지 않거나 만료되었습니다. 이메일 인증번호 확인부터 다시 진행해 주세요.'
+      };
+    }
+
+    const { data, error } = await client.auth.updateUser({ password: newPassword });
+    if (error || !data?.user) {
+      const msg = error?.message || '';
+      if (isNetworkOrConnectionError(msg, error?.name)) {
+        return {
+          success: false,
+          errorType: 'supabase_connection_error',
+          error: 'Supabase 서버 연결 오류로 비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+        };
+      }
+      if (msg.toLowerCase().includes('different from the old password')) {
+        return {
+          success: false,
+          errorType: 'password_update_failed',
+          error: '새 비밀번호는 기존 비밀번호와 다르게 입력해 주세요.'
+        };
+      }
+      if (msg.toLowerCase().includes('at least') || msg.toLowerCase().includes('weak')) {
+        return {
+          success: false,
+          errorType: 'password_update_failed',
+          error: '비밀번호 보안 기준을 충족하지 않습니다. 6자리 이상으로 안전하게 입력해 주세요.'
+        };
+      }
+      return {
+        success: false,
+        errorType: 'password_update_failed',
+        error: msg ? `비밀번호 변경 실패: ${msg}` : '비밀번호 변경에 실패했습니다.'
+      };
+    }
+
+    return { success: true };
+  } catch (e: any) {
+    if (isNetworkOrConnectionError(e?.message || '', e?.name)) {
+      return {
+        success: false,
+        errorType: 'supabase_connection_error',
+        error: '네트워크 오류로 비밀번호를 변경하지 못했습니다.'
+      };
+    }
+    return {
+      success: false,
+      errorType: 'password_update_failed',
+      error: e?.message || '비밀번호 변경 중 오류가 발생했습니다.'
+    };
   }
 }
 
@@ -115,13 +831,13 @@ export async function isSiteAdmin(userId?: string): Promise<boolean> {
       return rpcData;
     }
 
-    // 2. Fallback: Query the `site_admins` table directly
+    // 2. Fallback: Query the `site_admins` table directly (actual columns: user_id, created_at)
     const targetUserId = userId || (await client.auth.getUser()).data.user?.id;
     if (!targetUserId) return false;
 
     const { data, error } = await client
       .from('site_admins')
-      .select('id, role')
+      .select('user_id, created_at')
       .eq('user_id', targetUserId)
       .maybeSingle();
 
@@ -133,6 +849,219 @@ export async function isSiteAdmin(userId?: string): Promise<boolean> {
   }
 
   return false;
+}
+
+export const SITE_CONTENTS_ROW_ID = 'main_contents';
+
+export type PublicSitePayload = Omit<AppState, 'inquiries' | 'quotes'>;
+
+const PUBLIC_SITE_PAYLOAD_KEYS: Array<keyof PublicSitePayload> = [
+  'content',
+  'theme',
+  'products',
+  'posts',
+  'reviews',
+  'formConfig',
+  'seo',
+  'social',
+  'formspreeEndpoint'
+];
+
+/**
+ * Extract ONLY public website contents from AppState.
+ * Strictly excludes private customer inquiries (`inquiries`, `quotes`) and credentials.
+ */
+export function extractPublicSitePayload(state: AppState): PublicSitePayload {
+  return {
+    content: state.content,
+    theme: state.theme,
+    products: state.products,
+    posts: state.posts,
+    reviews: state.reviews,
+    formConfig: state.formConfig,
+    seo: state.seo,
+    social: state.social,
+    formspreeEndpoint: state.formspreeEndpoint
+  };
+}
+
+/**
+ * Pick only recognized public keys from an incoming remote payload object.
+ * Returns null if the payload is empty or invalid.
+ */
+export function sanitizeIncomingPublicPayload(raw: unknown): Partial<PublicSitePayload> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+
+  const source = raw as Record<string, unknown>;
+  const sanitized: Partial<PublicSitePayload> = {};
+  let hasValidKey = false;
+
+  for (const key of PUBLIC_SITE_PAYLOAD_KEYS) {
+    if (source[key] !== undefined && source[key] !== null) {
+      (sanitized as Record<string, unknown>)[key] = source[key];
+      hasValidKey = true;
+    }
+  }
+
+  return hasValidKey ? sanitized : null;
+}
+
+export interface FetchPublicSiteContentsResult {
+  ok: boolean;
+  exists: boolean;
+  payload: Partial<PublicSitePayload> | null;
+  updatedAt: string | null;
+  error?: string;
+}
+
+/**
+ * Fetch public homepage contents from Supabase `site_contents` (`main_contents`).
+ * Never throws or wipes local data on failure.
+ */
+export async function fetchPublicSiteContents(): Promise<FetchPublicSiteContentsResult> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      ok: false,
+      exists: false,
+      payload: null,
+      updatedAt: null,
+      error: 'Supabase 연결 정보가 설정되지 않았습니다.'
+    };
+  }
+
+  try {
+    const { data, error } = await client
+      .from('site_contents')
+      .select('id, payload, updated_at')
+      .eq('id', SITE_CONTENTS_ROW_ID)
+      .maybeSingle();
+
+    if (error) {
+      return {
+        ok: false,
+        exists: false,
+        payload: null,
+        updatedAt: null,
+        error: error.message
+      };
+    }
+
+    if (!data) {
+      return {
+        ok: true,
+        exists: false,
+        payload: null,
+        updatedAt: null
+      };
+    }
+
+    const sanitized = sanitizeIncomingPublicPayload(data.payload);
+    if (!sanitized) {
+      return {
+        ok: true,
+        exists: false,
+        payload: null,
+        updatedAt: data.updated_at || null
+      };
+    }
+
+    return {
+      ok: true,
+      exists: true,
+      payload: sanitized,
+      updatedAt: data.updated_at || null
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      exists: false,
+      payload: null,
+      updatedAt: null,
+      error: e?.message || 'Supabase 조회 중 네트워크 오류가 발생했습니다.'
+    };
+  }
+}
+
+export interface PublishPublicSiteContentsResult {
+  success: boolean;
+  updatedAt?: string;
+  error?: string;
+}
+
+/**
+ * Publish public homepage contents to Supabase `site_contents` (`main_contents`).
+ * Requires authenticated Supabase Auth user present in `site_admins` (`is_site_admin()`).
+ */
+export async function publishPublicSiteContents(state: AppState): Promise<PublishPublicSiteContentsResult> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      error: 'Supabase 연결 설정(Project URL / Anon Key)이 먼저 필요합니다.'
+    };
+  }
+
+  try {
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    const authUser = sessionData?.session?.user;
+    if (sessionError || !authUser) {
+      return {
+        success: false,
+        error: 'Supabase 관리자 이메일 계정으로 로그인한 상태에서만 DB에 게시할 수 있습니다.'
+      };
+    }
+
+    const adminAuthorized = await isSiteAdmin(authUser.id);
+    if (!adminAuthorized) {
+      return {
+        success: false,
+        error: '현재 로그인한 계정에 관리자 권한(site_admins / is_site_admin)이 없습니다.'
+      };
+    }
+
+    const publicPayload = extractPublicSitePayload(state);
+    const nowIso = new Date().toISOString();
+
+    const { data, error } = await client
+      .from('site_contents')
+      .upsert(
+        {
+          id: SITE_CONTENTS_ROW_ID,
+          payload: publicPayload,
+          updated_at: nowIso
+        },
+        { onConflict: 'id' }
+      )
+      .select('id, updated_at')
+      .single();
+
+    if (error) {
+      const msg = error.message || '';
+      if (msg.includes('site_contents') && (msg.includes('does not exist') || msg.includes('Could not find the table') || error.code === '42P01' || error.code === 'PGRST205')) {
+        return {
+          success: false,
+          error: 'Supabase에 site_contents 테이블이 아직 생성되지 않았습니다. SQL Editor에서 001_site_contents.sql을 먼저 실행해 주세요.'
+        };
+      }
+      return {
+        success: false,
+        error: `Supabase 저장 실패: ${msg}`
+      };
+    }
+
+    return {
+      success: true,
+      updatedAt: data?.updated_at || nowIso
+    };
+  } catch (e: any) {
+    return {
+      success: false,
+      error: e?.message || 'Supabase 게시 중 예기치 않은 오류가 발생했습니다.'
+    };
+  }
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -614,114 +1543,60 @@ export async function verifyQuotePasswordWithHash(plainPassword: string, storedH
 }
 
 /**
- * Complete SQL Migration Script for Supabase
+ * Phase 1 Safe SQL Migration Script for Supabase (`site_contents` only)
  */
-export const SUPABASE_FOODHOME_SETUP_SQL = `-- ========================================================
--- FOODHOME (푸드홈) Supabase Database Setup & Migration SQL
--- ========================================================
+export const SUPABASE_FOODHOME_SETUP_SQL = `-- ============================================================================
+-- FOODHOME (푸드홈) 1차 마이그레이션: 홈페이지 공개 콘텐츠 저장 테이블 (site_contents)
+-- ============================================================================
+-- [안전 원칙]
+-- 1. 기존 테이블(site_admins, form_definitions, form_submissions) 및 데이터를
+--    절대 삭제하거나 수정하지 않습니다.
+-- 2. 기존 is_site_admin() 함수와 기존 RLS 정책을 변경하지 않습니다.
+-- 3. 공개 콘텐츠(회사소개, 배너, 제품, 공지, FAQ, 후기, 테마, SEO, 폼설정)만
+--    저장하며, 고객 문의/견적/비밀번호 등 개인정보(inquiries, quotes)는
+--    payload에 저장하지 않습니다.
+-- ============================================================================
 
--- 1. Create or ensure site_admins table exists
-CREATE TABLE IF NOT EXISTS site_admins (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  role TEXT NOT NULL DEFAULT 'admin',
-  created_at TIMESTAMPTZ DEFAULT now()
+CREATE TABLE IF NOT EXISTS public.site_contents (
+  id TEXT PRIMARY KEY,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Enable RLS on site_admins
-ALTER TABLE site_admins ENABLE ROW LEVEL SECURITY;
+-- RLS 활성화 (반복 실행 가능)
+ALTER TABLE public.site_contents ENABLE ROW LEVEL SECURITY;
 
--- 2. is_site_admin() RPC function for checking current logged in user
-CREATE OR REPLACE FUNCTION is_site_admin()
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
+-- 기존 정책 존재 여부를 확인하여 중복 없이 안전하게 정책 생성
+DO $$
 BEGIN
-  RETURN EXISTS (
-    SELECT 1 FROM site_admins WHERE user_id = auth.uid()
-  );
-END;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'site_contents'
+      AND policyname = 'Public can read site contents'
+  ) THEN
+    CREATE POLICY "Public can read site contents"
+      ON public.site_contents
+      FOR SELECT
+      TO public
+      USING (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'site_contents'
+      AND policyname = 'Admins can manage site contents'
+  ) THEN
+    CREATE POLICY "Admins can manage site contents"
+      ON public.site_contents
+      FOR ALL
+      TO authenticated
+      USING (public.is_site_admin())
+      WITH CHECK (public.is_site_admin());
+  END IF;
+END
 $$;
-
--- 3. 1:1 대량 납품 견적 상담 테이블 (quote_inquiries)
-CREATE TABLE IF NOT EXISTS quote_inquiries (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_number BIGSERIAL,
-  title TEXT NOT NULL,
-  company_name TEXT NOT NULL,
-  contact_person TEXT NOT NULL,
-  phone TEXT NOT NULL,
-  email TEXT,
-  region TEXT,
-  business_type TEXT,
-  interested_products TEXT[] DEFAULT '{}',
-  monthly_volume TEXT,
-  delivery_schedule TEXT,
-  message TEXT,
-  attachments JSONB DEFAULT '[]',
-  password_hash TEXT NOT NULL,
-  is_secret BOOLEAN DEFAULT true,
-  status TEXT NOT NULL DEFAULT '접수완료',
-  read_count INT DEFAULT 1,
-  admin_reply JSONB,
-  admin_memo TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Enable RLS on quote_inquiries
-ALTER TABLE quote_inquiries ENABLE ROW LEVEL SECURITY;
-
--- Anyone can submit a quote inquiry
-CREATE POLICY "Public can insert quote inquiries"
-ON quote_inquiries FOR INSERT
-WITH CHECK (true);
-
--- Authenticated admins can view and manage all inquiries
-CREATE POLICY "Admins have full access to quote inquiries"
-ON quote_inquiries FOR ALL
-USING (is_site_admin());
-
--- 4. 홈페이지 커스텀 콘텐츠 저장 테이블 (site_contents)
--- 관리자 페이지에서 수정한 배너, 소개 문구, 이미지 등의 실시간 동기화
-CREATE TABLE IF NOT EXISTS site_contents (
-  id TEXT PRIMARY KEY DEFAULT 'foodhome_main_content',
-  content JSONB NOT NULL,
-  theme JSONB,
-  form_config JSONB,
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
-
-ALTER TABLE site_contents ENABLE ROW LEVEL SECURITY;
-
--- Anyone can read public site contents
-CREATE POLICY "Public can read site contents"
-ON site_contents FOR SELECT
-USING (true);
-
--- Only admins can modify site contents
-CREATE POLICY "Admins can update site contents"
-ON site_contents FOR ALL
-USING (is_site_admin());
-
--- 5. Supabase Storage: 'foodhome-media' 버킷 생성
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('foodhome-media', 'foodhome-media', true)
-ON CONFLICT (id) DO NOTHING;
-
--- Storage RLS: Public can view images
-CREATE POLICY "Public can view media"
-ON storage.objects FOR SELECT
-USING (bucket_id = 'foodhome-media');
-
--- Storage RLS: Admin can upload
-CREATE POLICY "Admins can upload media"
-ON storage.objects FOR INSERT
-WITH CHECK (bucket_id = 'foodhome-media');
-
--- Storage RLS: Admin can delete
-CREATE POLICY "Admins can delete media"
-ON storage.objects FOR DELETE
-USING (bucket_id = 'foodhome-media');
 `;

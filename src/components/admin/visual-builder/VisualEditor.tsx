@@ -12,7 +12,6 @@ import { VisualPageTree } from './VisualPageTree';
 import { VisualInspectorPanel } from './VisualInspectorPanel';
 import { SectionAddModal } from './SectionAddModal';
 import { getDefaultProductSections, getDefaultPageSections } from '../../../data/defaultPageSections';
-import { getSupabaseClient } from '../../../lib/supabase';
 
 // Pages to render in canvas
 import { Header } from '../../Header';
@@ -86,6 +85,12 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({
     updateProduct,
     updatePageSections,
     updateMainSections,
+    supabaseConfig,
+    isSupabaseAdminAuthed,
+    isPublishingToSupabase,
+    publishPublicContentsToSupabase,
+    hasUnpublishedChanges: contextUnpublished,
+    setHasUnpublishedChanges: setContextUnpublished,
     showToast 
   } = useApp();
 
@@ -102,7 +107,13 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   // 5. Staging / Draft Tracking
-  const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
+  const [hasLocalUnpublished, setHasLocalUnpublished] = useState(false);
+  const hasUnpublishedChanges = hasLocalUnpublished || contextUnpublished;
+  const setHasUnpublishedChanges = (dirty: boolean) => {
+    setHasLocalUnpublished(dirty);
+    setContextUnpublished(dirty);
+  };
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [lastPublishedTime, setLastPublishedTime] = useState<string>(() => {
     return new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
   });
@@ -250,29 +261,29 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({
     showToast('새로운 섹션이 추가되었습니다.');
   };
 
-  // Publish changes to live site
+  // Publish changes to live site (and Supabase site_contents if configured)
   const handlePublish = async () => {
-    try {
-      // 1. Sync to Supabase remote database if client is configured
-      const client = getSupabaseClient();
-      if (client) {
-        try {
-          await client.from('site_contents').upsert([
-            { id: 'main_contents', payload: state, updated_at: new Date().toISOString() }
-          ]);
-        } catch (err) {
-          console.warn('Supabase publish sync notice:', err);
-        }
-      }
+    setPublishError(null);
+    const isSupabaseConfigured = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
 
+    if (isSupabaseConfigured) {
+      const res = await publishPublicContentsToSupabase();
+      if (!res.success) {
+        const errMsg = res.error || 'Supabase 게시에 실패했습니다.';
+        setPublishError(errMsg);
+        return;
+      }
       setHasUnpublishedChanges(false);
       const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
       setLastPublishedTime(nowStr);
-      showToast(`🎉 실제 홈페이지에 최신 변경사항이 성공적으로 게시되었습니다! (${nowStr})`);
-    } catch {
-      showToast('게시 완료: 현재 브라우저 및 방문자 화면에 즉시 적용되었습니다.');
-      setHasUnpublishedChanges(false);
+      showToast(`Supabase DB 및 실제 홈페이지에 게시 완료되었습니다! (${nowStr})`);
+      return;
     }
+
+    setHasUnpublishedChanges(false);
+    const nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    setLastPublishedTime(nowStr);
+    showToast(`로컬 브라우저에 반영되었습니다. (Supabase 미설정: ${nowStr})`);
   };
 
   // Safe Close with Confirmation if unpublished
@@ -392,14 +403,21 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({
           {/* Publish Button */}
           <button
             onClick={handlePublish}
-            className={`px-4 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+            disabled={isPublishingToSupabase}
+            className={`px-4 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shadow-md cursor-pointer disabled:opacity-60 ${
               hasUnpublishedChanges
-                ? 'bg-[#872D35] hover:bg-[#A3343E] text-white animate-bounce'
+                ? 'bg-[#872D35] hover:bg-[#A3343E] text-white'
                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'
             }`}
           >
             <Send className="w-3.5 h-3.5" />
-            <span>실제 홈페이지 게시하기</span>
+            <span>
+              {isPublishingToSupabase
+                ? 'Supabase 게시 중...'
+                : supabaseConfig.url && supabaseConfig.anonKey
+                ? 'Supabase에 게시하기'
+                : '실제 홈페이지 게시하기'}
+            </span>
           </button>
 
           {/* Close Editor */}
@@ -414,6 +432,21 @@ export const VisualEditor: React.FC<VisualEditorProps> = ({
         </div>
 
       </header>
+
+      {publishError && (
+        <div className="bg-red-950 text-red-100 px-4 py-2 text-xs flex items-center justify-between border-b border-red-800 shrink-0">
+          <span className="font-bold">
+            Supabase 게시 오류: {publishError}
+            {!isSupabaseAdminAuthed && ' (관리자 로그인 모달에서 Supabase 이메일 계정으로 로그인해 주세요.)'}
+          </span>
+          <button
+            onClick={() => setPublishError(null)}
+            className="px-2 py-0.5 rounded bg-red-900 hover:bg-red-800 text-white text-[11px] font-bold cursor-pointer"
+          >
+            닫기
+          </button>
+        </div>
+      )}
 
       {/* 2. THREE-PANEL WORKSPACE */}
       <div className="flex-1 flex overflow-hidden relative">

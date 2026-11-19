@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { 
   AppState, 
   SiteContent, 
@@ -30,7 +30,23 @@ import {
   isSiteAdmin,
   hashPassword,
   verifyQuotePasswordWithHash,
-  SupabaseConfig 
+  fetchPublicSiteContents,
+  publishPublicSiteContents,
+  PublicSitePayload,
+  SupabaseConfig,
+  RecoveryFailureReason,
+  OtpRecoveryErrorType,
+  isAuthCallbackHash,
+  inspectAuthCallbackUrl,
+  consumeLegacyAuthUrlNotice,
+  sendPasswordResetOtpEmail,
+  verifyPasswordRecoveryOtp,
+  isManualOtpRecoveryActive,
+  isPasswordRecoveryPending,
+  setPasswordRecoveryPending,
+  getSavedRecoveryEmail,
+  clearAuthUrlParams,
+  updatePasswordInRecovery
 } from '../lib/supabase';
 
 interface AppContextType {
@@ -113,10 +129,53 @@ interface AppContextType {
   // Supabase & Admin Authentication
   isAdminLoggedIn: boolean;
   setIsAdminLoggedIn: (logged: boolean) => void;
+  isSupabaseAdminAuthed: boolean;
+  supabaseAdminEmail: string | null;
+  isSyncingFromSupabase: boolean;
+  isPublishingToSupabase: boolean;
+  hasUnpublishedChanges: boolean;
+  setHasUnpublishedChanges: (dirty: boolean) => void;
+  lastSupabasePublishAt: string | null;
+  lastSupabaseSyncError: string | null;
+  remoteSiteContentsInfo: { exists: boolean; updatedAt: string | null } | null;
+  publishPublicContentsToSupabase: () => Promise<{ success: boolean; updatedAt?: string; error?: string }>;
+  pullPublicContentsFromSupabase: () => Promise<{ success: boolean; error?: string }>;
   handleAdminLogin: (credentials: { email?: string; password: string }) => Promise<{ success: boolean; error?: string }>;
   handleAdminLogout: () => Promise<void>;
   supabaseConfig: { url: string; anonKey: string };
   updateSupabaseConfig: (cfg: { url: string; anonKey: string }) => void;
+
+  // Password Recovery Flow (Supabase Auth Email OTP verifyOtp)
+  isPasswordRecoveryMode: boolean;
+  isCheckingRecoverySession: boolean;
+  hasValidRecoverySession: boolean;
+  passwordRecoveryEmail: string | null;
+  passwordRecoveryError: string | null;
+  passwordRecoveryFailureReason: RecoveryFailureReason | null;
+  passwordResetSuccessNotice: string | null;
+  legacyAuthLinkNotice: string | null;
+  clearPasswordResetSuccessNotice: () => void;
+  clearLegacyAuthLinkNotice: () => void;
+  requestPasswordResetOtp: (email: string) => Promise<{
+    success: boolean;
+    cooldownSeconds?: number;
+    recoverEndpoint?: string;
+    errorType?: OtpRecoveryErrorType;
+    error?: string;
+  }>;
+  verifyPasswordResetOtp: (email: string, token: string) => Promise<{
+    success: boolean;
+    email?: string;
+    errorType?: OtpRecoveryErrorType;
+    error?: string;
+  }>;
+  submitPasswordRecoveryUpdate: (newPassword: string) => Promise<{
+    success: boolean;
+    errorType?: OtpRecoveryErrorType;
+    error?: string;
+  }>;
+  finishPasswordRecoveryToLogin: () => void;
+  cancelPasswordRecovery: () => Promise<void>;
   
   // Sample Board Post Helpers
   addSamplePost: (post: {
@@ -161,6 +220,131 @@ interface AppContextType {
 
 const STORAGE_KEY = 'foodhome_app_data_v4';
 
+function normalizeStateWithDefaults(
+  baseState: AppState,
+  parsed: Partial<AppState> | Partial<PublicSitePayload>,
+  preservePrivate?: { inquiries: B2BInquiry[]; quotes: QuoteInquiry[] }
+): AppState {
+  const parsedAsApp = parsed as Partial<AppState>;
+  return {
+    ...baseState,
+    ...parsed,
+    content: {
+      ...baseState.content,
+      ...(parsed.content || {}),
+      navMenus:
+        Array.isArray(parsed.content?.navMenus) && parsed.content.navMenus.length > 0
+          ? parsed.content.navMenus
+          : baseState.content.navMenus,
+      banners:
+        Array.isArray(parsed.content?.banners) && parsed.content.banners.length > 0
+          ? parsed.content.banners
+          : baseState.content.banners,
+      facilityItems:
+        Array.isArray(parsed.content?.facilityItems) && parsed.content.facilityItems.length > 0
+          ? parsed.content.facilityItems
+          : baseState.content.facilityItems,
+      faqItems: Array.isArray(parsed.content?.faqItems)
+        ? parsed.content.faqItems
+        : baseState.content.faqItems,
+      faqCategories:
+        Array.isArray(parsed.content?.faqCategories) && parsed.content.faqCategories.length > 0
+          ? parsed.content.faqCategories
+          : baseState.content.faqCategories,
+      productCategoriesList:
+        Array.isArray(parsed.content?.productCategoriesList) &&
+        parsed.content.productCategoriesList.length > 0
+          ? parsed.content.productCategoriesList
+          : baseState.content.productCategoriesList,
+      companySubpages:
+        Array.isArray(parsed.content?.companySubpages) && parsed.content.companySubpages.length > 0
+          ? parsed.content.companySubpages
+          : baseState.content.companySubpages,
+      mainSections:
+        Array.isArray(parsed.content?.mainSections) && parsed.content.mainSections.length > 0
+          ? parsed.content.mainSections.map((sec: any) =>
+              sec.id === 'reviews' && sec.title === '전국 480여 개 외식 파트너의 생생한 찬사'
+                ? { ...sec, title: '전국 프랜차이즈 및 외식업체 대표님들의 후기' }
+                : sec
+            )
+          : baseState.content.mainSections,
+      pageSections: (() => {
+        const savedSections = parsed.content?.pageSections;
+        if (!savedSections) return baseState.content.pageSections;
+        const introList = savedSections['about-intro'] || savedSections['intro'];
+        if (Array.isArray(introList) && introList.length > 0) {
+          const hasModernIntro = introList.some(
+            (s: any) =>
+              s.id === 'sec-intro-text-1' ||
+              s.id === 'sec-intro-image' ||
+              s.id === 'sec-intro-signature' ||
+              s.type === 'signature'
+          );
+          const isLegacyUntouchedIntro =
+            !hasModernIntro &&
+            introList.some((s: any) => s.id === 'sec-intro-ceo' && s.visible !== false);
+          if (isLegacyUntouchedIntro) {
+            const defs = getDefaultPageSections('about-intro', parsed.content || {});
+            const merged = [
+              ...defs.slice(0, 4),
+              ...introList.map((s: any) => {
+                if (['sec-intro-corporate', 'sec-intro-values', 'sec-intro-cta', 'sec-intro-ceo'].includes(s.id)) {
+                  return { ...s, visible: false };
+                }
+                return s;
+              })
+            ];
+            return {
+              ...savedSections,
+              'about-intro': merged
+            };
+          }
+        }
+        return savedSections;
+      })()
+    },
+    theme: {
+      ...baseState.theme,
+      ...(parsed.theme || {}),
+      primaryColor:
+        parsed.theme?.primaryColor === '#1e40af' || !parsed.theme?.primaryColor
+          ? baseState.theme.primaryColor
+          : parsed.theme.primaryColor,
+      accentColor:
+        parsed.theme?.accentColor === '#2563eb' || !parsed.theme?.accentColor
+          ? baseState.theme.accentColor
+          : parsed.theme.accentColor,
+      sectionsVisible: {
+        ...baseState.theme.sectionsVisible,
+        ...((parsed.theme && parsed.theme.sectionsVisible) || {})
+      }
+    },
+    products:
+      Array.isArray(parsed.products) && parsed.products.length > 0
+        ? parsed.products
+        : baseState.products,
+    posts: Array.isArray(parsed.posts) ? parsed.posts : baseState.posts,
+    reviews: Array.isArray(parsed.reviews) ? parsed.reviews : baseState.reviews,
+    inquiries: preservePrivate
+      ? preservePrivate.inquiries
+      : Array.isArray(parsedAsApp.inquiries)
+      ? parsedAsApp.inquiries
+      : baseState.inquiries,
+    quotes: preservePrivate
+      ? preservePrivate.quotes
+      : Array.isArray(parsedAsApp.quotes)
+      ? parsedAsApp.quotes
+      : baseState.quotes,
+    formConfig: parsed.formConfig
+      ? { ...baseState.formConfig, ...parsed.formConfig }
+      : baseState.formConfig,
+    seo: { ...baseState.seo, ...(parsed.seo || {}) },
+    social: { ...baseState.social, ...(parsed.social || {}) },
+    formspreeEndpoint:
+      parsed.formspreeEndpoint || baseState.formspreeEndpoint || 'https://formspree.io/f/xoejykbn'
+  };
+}
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -171,112 +355,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && typeof parsed === 'object') {
-            return {
-              ...initialData,
-              ...parsed,
-              content: { 
-                ...initialData.content, 
-                ...(parsed.content || {}),
-                navMenus: Array.isArray(parsed.content?.navMenus) && parsed.content.navMenus.length > 0
-                  ? parsed.content.navMenus
-                  : initialData.content.navMenus,
-                banners: Array.isArray(parsed.content?.banners) && parsed.content.banners.length > 0 
-                  ? parsed.content.banners 
-                  : initialData.content.banners,
-                facilityItems: Array.isArray(parsed.content?.facilityItems) && parsed.content.facilityItems.length > 0 
-                  ? parsed.content.facilityItems 
-                  : initialData.content.facilityItems,
-                faqItems: Array.isArray(parsed.content?.faqItems)
-                  ? parsed.content.faqItems
-                  : initialData.content.faqItems,
-                faqCategories: Array.isArray(parsed.content?.faqCategories) && parsed.content.faqCategories.length > 0
-                  ? parsed.content.faqCategories
-                  : initialData.content.faqCategories,
-                productCategoriesList: Array.isArray(parsed.content?.productCategoriesList) && parsed.content.productCategoriesList.length > 0
-                  ? parsed.content.productCategoriesList
-                  : initialData.content.productCategoriesList,
-                companySubpages: Array.isArray(parsed.content?.companySubpages) && parsed.content.companySubpages.length > 0
-                  ? parsed.content.companySubpages
-                  : initialData.content.companySubpages,
-                mainSections: Array.isArray(parsed.content?.mainSections) && parsed.content.mainSections.length > 0
-                  ? parsed.content.mainSections.map((sec: any) =>
-                      sec.id === 'reviews' && sec.title === '전국 480여 개 외식 파트너의 생생한 찬사'
-                        ? { ...sec, title: '전국 프랜차이즈 및 외식업체 대표님들의 후기' }
-                        : sec
-                    )
-                  : initialData.content.mainSections,
-                pageSections: (() => {
-                  const savedSections = parsed.content?.pageSections;
-                  if (!savedSections) return undefined;
-                  const introList = savedSections['about-intro'] || savedSections['intro'];
-                  if (Array.isArray(introList) && introList.length > 0) {
-                    const hasModernIntro = introList.some(
-                      (s: any) =>
-                        s.id === 'sec-intro-text-1' ||
-                        s.id === 'sec-intro-image' ||
-                        s.id === 'sec-intro-signature' ||
-                        s.type === 'signature'
-                    );
-                    const isLegacyUntouchedIntro =
-                      !hasModernIntro &&
-                      introList.some((s: any) => s.id === 'sec-intro-ceo' && s.visible !== false);
-                    if (isLegacyUntouchedIntro) {
-                      const defs = getDefaultPageSections('about-intro', parsed.content || {});
-                      const merged = [
-                        ...defs.slice(0, 4),
-                        ...introList.map((s: any) => {
-                          if (['sec-intro-corporate', 'sec-intro-values', 'sec-intro-cta', 'sec-intro-ceo'].includes(s.id)) {
-                            return { ...s, visible: false };
-                          }
-                          return s;
-                        })
-                      ];
-                      return {
-                        ...savedSections,
-                        'about-intro': merged
-                      };
-                    }
-                  }
-                  return savedSections;
-                })()
-              },
-              theme: { 
-                ...initialData.theme, 
-                ...(parsed.theme || {}),
-                // If previous blue was stored, default to new premium burgundy
-                primaryColor: (parsed.theme?.primaryColor === '#1e40af' || !parsed.theme?.primaryColor) 
-                  ? initialData.theme.primaryColor 
-                  : parsed.theme.primaryColor,
-                accentColor: (parsed.theme?.accentColor === '#2563eb' || !parsed.theme?.accentColor) 
-                  ? initialData.theme.accentColor 
-                  : parsed.theme.accentColor,
-                sectionsVisible: {
-                  ...initialData.theme.sectionsVisible,
-                  ...((parsed.theme && parsed.theme.sectionsVisible) || {})
-                }
-              },
-              products: Array.isArray(parsed.products) && parsed.products.length > 0
-                ? parsed.products
-                : initialData.products,
-              posts: Array.isArray(parsed.posts)
-                ? parsed.posts
-                : initialData.posts,
-              reviews: Array.isArray(parsed.reviews)
-                ? parsed.reviews
-                : initialData.reviews,
-              inquiries: Array.isArray(parsed.inquiries)
-                ? parsed.inquiries
-                : initialData.inquiries,
-              quotes: Array.isArray(parsed.quotes)
-                ? parsed.quotes
-                : initialData.quotes,
-              formConfig: parsed.formConfig
-                ? { ...initialData.formConfig, ...parsed.formConfig }
-                : initialData.formConfig,
-              seo: { ...initialData.seo, ...(parsed.seo || {}) },
-              social: { ...initialData.social, ...(parsed.social || {}) },
-              formspreeEndpoint: parsed.formspreeEndpoint || initialData.formspreeEndpoint || 'https://formspree.io/f/xoejykbn'
-            };
+            return normalizeStateWithDefaults(initialData, parsed);
           }
         }
       }
@@ -288,10 +367,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activePage, setActivePage] = useState<string>(() => {
     try {
-      if (typeof window !== 'undefined' && window.location.hash) {
-        const hash = window.location.hash.replace('#', '');
-        if (hash.startsWith('product/')) return 'product-detail';
-        if (hash) return hash;
+      if (typeof window !== 'undefined') {
+        if (inspectAuthCallbackUrl().hasAuthParams) return 'home';
+        if (window.location.hash) {
+          const hash = window.location.hash.replace('#', '');
+          if (isAuthCallbackHash(hash)) return 'home';
+          if (hash.startsWith('product/')) return 'product-detail';
+          if (hash) return hash;
+        }
       }
     } catch {}
     return 'home';
@@ -346,6 +429,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '');
+      if (isAuthCallbackHash(hash) || inspectAuthCallbackUrl().hasAuthParams) {
+        return;
+      }
       if (!hash || hash === 'home') {
         setActivePage('home');
       } else if (hash.startsWith('product/')) {
@@ -365,6 +451,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [companyAboutTab, setCompanyAboutTab] = useState<string>('intro');
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const isAdminOpenRef = useRef(isAdminOpen);
+  useEffect(() => {
+    isAdminOpenRef.current = isAdminOpen;
+  }, [isAdminOpen]);
+
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     try {
       return sessionStorage.getItem('foodhome_admin_session') === 'true';
@@ -372,7 +463,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
   });
+  const isAdminLoggedInRef = useRef(isAdminLoggedIn);
+  useEffect(() => {
+    isAdminLoggedInRef.current = isAdminLoggedIn;
+  }, [isAdminLoggedIn]);
+
   const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => getSavedSupabaseConfig());
+  const [isSupabaseAdminAuthed, setIsSupabaseAdminAuthed] = useState(false);
+  const [supabaseAdminEmail, setSupabaseAdminEmail] = useState<string | null>(null);
+  const [isSyncingFromSupabase, setIsSyncingFromSupabase] = useState(false);
+  const [isPublishingToSupabase, setIsPublishingToSupabase] = useState(false);
+  const [hasUnpublishedChanges, setHasUnpublishedChanges] = useState(false);
+  const [lastSupabasePublishAt, setLastSupabasePublishAt] = useState<string | null>(null);
+  const [lastSupabaseSyncError, setLastSupabaseSyncError] = useState<string | null>(null);
+  const [remoteSiteContentsInfo, setRemoteSiteContentsInfo] = useState<{ exists: boolean; updatedAt: string | null } | null>(null);
+
+  const [isPasswordRecoveryMode, setIsPasswordRecoveryMode] = useState<boolean>(() => isPasswordRecoveryPending());
+  const [isCheckingRecoverySession, setIsCheckingRecoverySession] = useState<boolean>(() => isPasswordRecoveryPending());
+  const [hasValidRecoverySession, setHasValidRecoverySession] = useState<boolean>(false);
+  const [passwordRecoveryEmail, setPasswordRecoveryEmail] = useState<string | null>(() => getSavedRecoveryEmail());
+  const [passwordRecoveryFailureReason, setPasswordRecoveryFailureReason] = useState<RecoveryFailureReason | null>(null);
+  const [passwordRecoveryError, setPasswordRecoveryError] = useState<string | null>(null);
+  const [passwordResetSuccessNotice, setPasswordResetSuccessNotice] = useState<string | null>(null);
+  const [legacyAuthLinkNotice, setLegacyAuthLinkNotice] = useState<string | null>(null);
+  const isPasswordRecoveryModeRef = useRef(isPasswordRecoveryMode);
+  useEffect(() => {
+    isPasswordRecoveryModeRef.current = isPasswordRecoveryMode;
+  }, [isPasswordRecoveryMode]);
+
   const [activeAdminTab, setActiveAdminTab] = useState('overview');
   const [isSampleModalOpen, setIsSampleModalOpen] = useState(false);
   const [isWholesaleModalOpen, setIsWholesaleModalOpen] = useState(false);
@@ -380,6 +498,200 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedPostForDetail, setSelectedPostForDetail] = useState<PostItem | null>(null);
   const [selectedFacilityMedia, setSelectedFacilityMedia] = useState<FacilityMediaItem | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Sync Supabase Auth session & fetch public site_contents on mount / config change
+  useEffect(() => {
+    let cancelled = false;
+    const legacyNotice = consumeLegacyAuthUrlNotice();
+    if (legacyNotice.detected && legacyNotice.message) {
+      setLegacyAuthLinkNotice(legacyNotice.message);
+      setIsAdminOpen(true);
+    }
+
+    const pendingOnMount = isPasswordRecoveryPending();
+    if (pendingOnMount) {
+      setIsCheckingRecoverySession(true);
+    } else {
+      setIsCheckingRecoverySession(false);
+    }
+
+    const client = getSupabaseClient();
+    let subscription: { unsubscribe: () => void } | null = null;
+
+    const initSupabaseSync = async () => {
+      // 0. If user refreshed during an already-verified OTP recovery session, verify live session
+      let recoveryConfirmedThisRun = false;
+      if (pendingOnMount) {
+        if (!client) {
+          setHasValidRecoverySession(false);
+          setPasswordRecoveryPending(false);
+          setIsPasswordRecoveryMode(false);
+          setPasswordRecoveryFailureReason('supabase_not_configured');
+          setPasswordRecoveryError(
+            '현재 브라우저에 Supabase 연결 설정(URL / Anon Key)이 없어 인증 세션을 확인할 수 없습니다.'
+          );
+          setIsCheckingRecoverySession(false);
+        } else {
+          try {
+            const { data: recSessionData, error: recSessionErr } = await client.auth.getSession();
+            if (cancelled) return;
+            const recUser = recSessionData?.session?.user;
+            if (recSessionErr || !recUser) {
+              setHasValidRecoverySession(false);
+              setPasswordRecoveryPending(false);
+              setIsPasswordRecoveryMode(false);
+              setIsCheckingRecoverySession(false);
+            } else {
+              recoveryConfirmedThisRun = true;
+              setHasValidRecoverySession(true);
+              setPasswordRecoveryEmail(recUser.email || getSavedRecoveryEmail());
+              setPasswordRecoveryFailureReason(null);
+              setPasswordRecoveryError(null);
+              setIsPasswordRecoveryMode(true);
+              isPasswordRecoveryModeRef.current = true;
+              setIsCheckingRecoverySession(false);
+            }
+          } catch {
+            if (!cancelled) {
+              setHasValidRecoverySession(false);
+              setPasswordRecoveryPending(false);
+              setIsPasswordRecoveryMode(false);
+              setIsCheckingRecoverySession(false);
+            }
+          }
+        }
+      }
+
+      if (!client) {
+        setIsSupabaseAdminAuthed(false);
+        setSupabaseAdminEmail(null);
+        setRemoteSiteContentsInfo(null);
+        return;
+      }
+
+      // 1. Check active Supabase Auth session & site_admins status (skip auto admin login while in recovery)
+      let sessionAdminOk = false;
+      try {
+        const { data: sessionData } = await client.auth.getSession();
+        const authUser = sessionData?.session?.user;
+        const recoveryActive =
+          recoveryConfirmedThisRun || isPasswordRecoveryPending() || isPasswordRecoveryModeRef.current;
+
+        if (authUser) {
+          if (recoveryActive) {
+            if (!cancelled && isPasswordRecoveryPending()) {
+              setHasValidRecoverySession(true);
+              setPasswordRecoveryEmail(authUser.email || getSavedRecoveryEmail());
+            }
+          } else {
+            sessionAdminOk = await isSiteAdmin(authUser.id);
+            if (!cancelled) {
+              setIsSupabaseAdminAuthed(sessionAdminOk);
+              setSupabaseAdminEmail(sessionAdminOk ? (authUser.email || null) : null);
+              if (sessionAdminOk) {
+                isAdminLoggedInRef.current = true;
+                setIsAdminLoggedIn(true);
+                try {
+                  sessionStorage.setItem('foodhome_admin_session', 'true');
+                } catch {}
+              }
+            }
+          }
+        } else if (!cancelled) {
+          setIsSupabaseAdminAuthed(false);
+          setSupabaseAdminEmail(null);
+        }
+      } catch (err) {
+        console.warn('Supabase session check notice:', err);
+      }
+
+      // 2. Fetch public site_contents ('main_contents')
+      if (!cancelled) {
+        setIsSyncingFromSupabase(true);
+      }
+      const res = await fetchPublicSiteContents();
+      if (cancelled) return;
+      setIsSyncingFromSupabase(false);
+
+      if (!res.ok) {
+        setLastSupabaseSyncError(res.error || null);
+        // Never overwrite or clear localStorage when DB fails or is unconfigured
+        return;
+      }
+
+      setLastSupabaseSyncError(null);
+      setRemoteSiteContentsInfo({ exists: res.exists, updatedAt: res.updatedAt });
+      if (res.updatedAt) {
+        setLastSupabasePublishAt(prev => prev || res.updatedAt);
+      }
+
+      // 3. Apply remote public payload ONLY for regular visitors (never overwrite active admin edits!)
+      const adminActive =
+        isAdminLoggedInRef.current ||
+        sessionAdminOk ||
+        (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('foodhome_admin_session') === 'true');
+
+      if (!adminActive && res.exists && res.payload) {
+        setState(prev =>
+          normalizeStateWithDefaults(prev, res.payload!, {
+            inquiries: prev.inquiries,
+            quotes: prev.quotes
+          })
+        );
+      }
+    };
+
+    initSupabaseSync();
+
+    if (client) {
+      const { data } = client.auth.onAuthStateChange(async (event, session) => {
+        if (cancelled) return;
+
+        // Avoid duplicate recovery handling when AdminLoginModal is driving manual verifyOtp()
+        if (event === 'PASSWORD_RECOVERY') {
+          if (isManualOtpRecoveryActive() || isAdminOpenRef.current) {
+            return;
+          }
+          if (session?.user) {
+            const recEmail = session.user.email || getSavedRecoveryEmail();
+            setPasswordRecoveryPending(true, recEmail);
+            setPasswordRecoveryEmail(recEmail);
+            setPasswordRecoveryFailureReason(null);
+            setPasswordRecoveryError(null);
+            setHasValidRecoverySession(true);
+            setIsCheckingRecoverySession(false);
+            setIsPasswordRecoveryMode(true);
+            isPasswordRecoveryModeRef.current = true;
+          }
+          return;
+        }
+
+        const user = session?.user;
+        if (!user) {
+          setIsSupabaseAdminAuthed(false);
+          setSupabaseAdminEmail(null);
+          return;
+        }
+
+        if (isPasswordRecoveryPending() || isPasswordRecoveryModeRef.current || isManualOtpRecoveryActive()) {
+          setPasswordRecoveryEmail(user.email || getSavedRecoveryEmail());
+          return;
+        }
+
+        const ok = await isSiteAdmin(user.id);
+        if (!cancelled) {
+          setIsSupabaseAdminAuthed(ok);
+          setSupabaseAdminEmail(ok ? (user.email || null) : null);
+        }
+      });
+      subscription = data.subscription;
+    }
+
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe();
+    };
+  }, [supabaseConfig.url, supabaseConfig.anonKey]);
 
   // Sync to localStorage (never delete/reset existing data on failure; alert user clearly if quota exceeded)
   useEffect(() => {
@@ -550,6 +862,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         content: mergedContent
       };
     });
+    setHasUnpublishedChanges(true);
     showToast('사이트 콘텐츠가 성공적으로 저장되었습니다.');
   };
 
@@ -558,6 +871,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       content: { ...prev.content, navMenus: menus }
     }));
+    setHasUnpublishedChanges(true);
     showToast('상단 메뉴(GNB) 설정이 성공적으로 저장되었습니다.');
   };
 
@@ -569,6 +883,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         navMenus: (prev.content.navMenus || []).map(m => m.id === id ? { ...m, ...updates } : m)
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('메뉴 항목이 업데이트되었습니다.');
   };
 
@@ -577,6 +892,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       theme: { ...prev.theme, ...newTheme }
     }));
+    setHasUnpublishedChanges(true);
     showToast('디자인 & 테마 설정이 반영되었습니다.');
   };
 
@@ -589,6 +905,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       products: [newProd, ...prev.products]
     }));
+    setHasUnpublishedChanges(true);
     showToast(`신규 제품 "${newProd.name}" 등록이 완료되었습니다.`);
   };
 
@@ -597,6 +914,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       products: prev.products.map(p => (p.id === id ? { ...p, ...updatedFields } : p))
     }));
+    setHasUnpublishedChanges(true);
     showToast('제품 정보가 수정되었습니다.');
   };
 
@@ -605,6 +923,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       products: prev.products.filter(p => p.id !== id)
     }));
+    setHasUnpublishedChanges(true);
     showToast('제품이 삭제되었습니다.');
   };
 
@@ -620,6 +939,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       posts: [newPost, ...prev.posts]
     }));
+    setHasUnpublishedChanges(true);
     showToast(`새로운 게시글 "${newPost.title}"이 등록되었습니다.`);
   };
 
@@ -628,6 +948,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       posts: prev.posts.map(p => (p.id === id ? { ...p, ...postFields } : p))
     }));
+    setHasUnpublishedChanges(true);
     showToast('게시글이 수정되었습니다.');
   };
 
@@ -636,6 +957,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       posts: prev.posts.filter(p => p.id !== id)
     }));
+    setHasUnpublishedChanges(true);
     showToast('게시글이 삭제되었습니다.');
   };
 
@@ -655,6 +977,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       reviews: [newRev, ...(prev.reviews || [])]
     }));
+    setHasUnpublishedChanges(true);
     showToast('새 파트너 후기가 등록되었습니다.');
   };
 
@@ -663,6 +986,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       reviews: (prev.reviews || []).map(r => (r.id === id ? { ...r, ...updates } : r))
     }));
+    setHasUnpublishedChanges(true);
     showToast('후기 내용이 수정되었습니다.');
   };
 
@@ -671,6 +995,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       reviews: (prev.reviews || []).filter(r => r.id !== id)
     }));
+    setHasUnpublishedChanges(true);
     showToast('후기가 삭제되었습니다.');
   };
 
@@ -679,6 +1004,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       reviews
     }));
+    setHasUnpublishedChanges(true);
     showToast('후기 표시 순서가 변경되었습니다.');
   };
 
@@ -696,6 +1022,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         faqItems: [...(prev.content.faqItems || []), newFaq]
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('새 자주하는 질문(FAQ)이 등록되었습니다.');
   };
 
@@ -707,6 +1034,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         faqItems: (prev.content.faqItems || []).map(f => f.id === id ? { ...f, ...updates } : f)
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('FAQ 항목이 수정되었습니다.');
   };
 
@@ -718,6 +1046,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         faqItems: (prev.content.faqItems || []).filter(f => f.id !== id)
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('FAQ 항목이 삭제되었습니다.');
   };
 
@@ -729,6 +1058,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         faqItems: items
       }
     }));
+    setHasUnpublishedChanges(true);
   };
 
   const updateFaqCategories = (categories: FaqCategoryItem[]) => {
@@ -739,6 +1069,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         faqCategories: categories
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('FAQ 카테고리가 성공적으로 저장되었습니다.');
   };
 
@@ -750,6 +1081,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         productCategoriesList: categories
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('제품 카테고리가 성공적으로 저장되었습니다.');
   };
 
@@ -761,6 +1093,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         companySubpages: subpages
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('회사소개 하위 메뉴 설정이 저장되었습니다.');
   };
 
@@ -782,6 +1115,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       };
     });
+    setHasUnpublishedChanges(true);
     showToast('메인페이지 섹션 설정이 성공적으로 저장되었습니다.');
   };
 
@@ -806,6 +1140,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       };
     });
+    setHasUnpublishedChanges(true);
     showToast('페이지 섹션 구성 및 내용이 성공적으로 저장되었습니다.');
   };
 
@@ -814,6 +1149,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       products
     }));
+    setHasUnpublishedChanges(true);
     showToast('제품 순서가 변경되었습니다.');
   };
 
@@ -863,6 +1199,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       seo: { ...prev.seo, ...newSeo }
     }));
+    setHasUnpublishedChanges(true);
     showToast('SEO 및 소셜 메타태그 정보가 저장되었습니다.');
   };
 
@@ -871,6 +1208,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       social: { ...prev.social, ...newSocial }
     }));
+    setHasUnpublishedChanges(true);
     showToast('소셜 미디어 링크 정보가 업데이트되었습니다.');
   };
 
@@ -879,6 +1217,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ...prev,
       formspreeEndpoint: endpoint
     }));
+    setHasUnpublishedChanges(true);
     showToast('Formspree 데이터 수집 엔드포인트가 저장되었습니다.');
   };
 
@@ -890,6 +1229,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch {
         //
       }
+      setHasUnpublishedChanges(true);
       showToast('초기 기본 데이터로 복원되었습니다.');
     }
   };
@@ -897,7 +1237,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const importData = (imported: AppState): boolean => {
     try {
       if (imported && imported.content && imported.products && imported.posts) {
-        setState(imported);
+        setState(normalizeStateWithDefaults(initialData, imported));
+        setHasUnpublishedChanges(true);
         showToast('데이터 백업 파일이 성공적으로 불러와졌습니다.');
         return true;
       }
@@ -914,29 +1255,91 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('Supabase 연결 설정이 저장되었습니다.');
   };
 
+  const publishPublicContentsToSupabase = async (): Promise<{ success: boolean; updatedAt?: string; error?: string }> => {
+    setIsPublishingToSupabase(true);
+    const res = await publishPublicSiteContents(state);
+    setIsPublishingToSupabase(false);
+
+    if (res.success) {
+      setHasUnpublishedChanges(false);
+      const publishedAt = res.updatedAt || new Date().toISOString();
+      setLastSupabasePublishAt(publishedAt);
+      setLastSupabaseSyncError(null);
+      setRemoteSiteContentsInfo({ exists: true, updatedAt: publishedAt });
+      showToast('홈페이지 공개 콘텐츠가 Supabase DB에 성공적으로 게시되었습니다.');
+    } else {
+      setLastSupabaseSyncError(res.error || 'Supabase 게시 실패');
+      showToast(res.error || 'Supabase 게시에 실패했습니다.');
+    }
+
+    return res;
+  };
+
+  const pullPublicContentsFromSupabase = async (): Promise<{ success: boolean; error?: string }> => {
+    setIsSyncingFromSupabase(true);
+    const res = await fetchPublicSiteContents();
+    setIsSyncingFromSupabase(false);
+
+    if (!res.ok) {
+      const msg = res.error || 'Supabase 조회에 실패했습니다.';
+      setLastSupabaseSyncError(msg);
+      showToast(msg);
+      return { success: false, error: msg };
+    }
+
+    setRemoteSiteContentsInfo({ exists: res.exists, updatedAt: res.updatedAt });
+    setLastSupabaseSyncError(null);
+
+    if (!res.exists || !res.payload) {
+      const msg = 'Supabase site_contents에 아직 게시된 공개 콘텐츠가 없습니다.';
+      showToast(msg);
+      return { success: false, error: msg };
+    }
+
+    setState(prev =>
+      normalizeStateWithDefaults(prev, res.payload!, {
+        inquiries: prev.inquiries,
+        quotes: prev.quotes
+      })
+    );
+    setHasUnpublishedChanges(false);
+    if (res.updatedAt) {
+      setLastSupabasePublishAt(res.updatedAt);
+    }
+    showToast('Supabase에서 최신 홈페이지 공개 콘텐츠를 불러왔습니다.');
+    return { success: true };
+  };
+
   const handleAdminLogin = async (credentials: { email?: string; password: string }): Promise<{ success: boolean; error?: string }> => {
     const client = getSupabaseClient();
-    
-    // 1. If Supabase is configured and an email is provided, attempt Supabase Auth
-    if (client && credentials.email) {
+    const inputId = (credentials.email || '').trim();
+    const inputPw = (credentials.password || '').trim();
+
+    // 1. If Supabase is configured and an email address is provided, attempt Supabase Auth
+    if (client && inputId.includes('@')) {
       try {
         const { data, error } = await client.auth.signInWithPassword({
-          email: credentials.email,
-          password: credentials.password
+          email: inputId,
+          password: inputPw
         });
         if (error) {
-          // If Supabase auth failed, return error
           return { success: false, error: error.message };
         }
         if (data.user) {
-          // Verify site admin status via RPC or table
           const isAdmin = await isSiteAdmin(data.user.id);
           if (!isAdmin) {
             await client.auth.signOut();
-            return { success: false, error: '해당 계정은 관리자(site_admin) 권한이 승인되지 않았습니다.' };
+            setIsSupabaseAdminAuthed(false);
+            setSupabaseAdminEmail(null);
+            return { success: false, error: '해당 계정은 관리자(site_admins) 권한이 승인되지 않았습니다.' };
           }
+          isAdminLoggedInRef.current = true;
           setIsAdminLoggedIn(true);
-          sessionStorage.setItem('foodhome_admin_session', 'true');
+          setIsSupabaseAdminAuthed(true);
+          setSupabaseAdminEmail(data.user.email || inputId);
+          try {
+            sessionStorage.setItem('foodhome_admin_session', 'true');
+          } catch {}
           showToast('Supabase 관리자 인증이 완료되었습니다.');
           return { success: true };
         }
@@ -945,17 +1348,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    // 2. Local fallback login: ID foodh1905 or custom master password
+    // 2. Local fallback login: ID foodh1905 or custom master password (preserved 100%)
     const validIds = ['foodh1905', 'admin@foodhome.co.kr', 'admin'];
-    const validPasswords = ['foodhome2025!', '1905', 'admin1234!'];
-    
-    const inputId = (credentials.email || '').trim();
-    const inputPw = (credentials.password || '').trim();
+    let customPw: string | null = null;
+    try {
+      customPw = sessionStorage.getItem('foodhome_admin_custom_pw');
+    } catch {}
+    const validPasswords = ['foodhome2025!', '1905', 'admin1234!', ...(customPw ? [customPw] : [])];
 
     if (
       (validIds.includes(inputId) || !inputId) &&
       (validPasswords.includes(inputPw) || inputPw === 'foodhome2025!' || inputPw === '1905')
     ) {
+      isAdminLoggedInRef.current = true;
       setIsAdminLoggedIn(true);
       try {
         sessionStorage.setItem('foodhome_admin_session', 'true');
@@ -978,13 +1383,129 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         //
       }
     }
+    isAdminLoggedInRef.current = false;
     setIsAdminLoggedIn(false);
+    setIsSupabaseAdminAuthed(false);
+    setSupabaseAdminEmail(null);
     try {
       sessionStorage.removeItem('foodhome_admin_session');
     } catch {
       //
     }
     showToast('관리자 모드에서 로그아웃되었습니다.');
+  };
+
+  const clearPasswordResetSuccessNotice = () => {
+    setPasswordResetSuccessNotice(null);
+  };
+
+  const clearLegacyAuthLinkNotice = () => {
+    setLegacyAuthLinkNotice(null);
+  };
+
+  const requestPasswordResetOtp = async (email: string) => {
+    return sendPasswordResetOtpEmail(email);
+  };
+
+  const verifyPasswordResetOtp = async (email: string, token: string) => {
+    const res = await verifyPasswordRecoveryOtp(email, token);
+    if (res.success) {
+      setHasValidRecoverySession(true);
+      setPasswordRecoveryEmail(res.email || email.trim());
+      setPasswordRecoveryFailureReason(null);
+      setPasswordRecoveryError(null);
+    } else {
+      setHasValidRecoverySession(false);
+    }
+    return res;
+  };
+
+  const submitPasswordRecoveryUpdate = async (newPassword: string) => {
+    if (!hasValidRecoverySession) {
+      return {
+        success: false,
+        errorType: 'session_creation_failed' as OtpRecoveryErrorType,
+        error: '유효한 비밀번호 재설정 인증 세션이 확인되지 않았습니다. 이메일 인증번호 확인부터 다시 진행해 주세요.'
+      };
+    }
+
+    const res = await updatePasswordInRecovery(newPassword);
+    if (!res.success) {
+      if (res.errorType === 'session_creation_failed') {
+        setHasValidRecoverySession(false);
+        setPasswordRecoveryPending(false);
+        setPasswordRecoveryFailureReason('session_creation_failed');
+        setPasswordRecoveryError(res.error || null);
+      }
+      return res;
+    }
+
+    // Clear recovery flags & temporary recovery session so admin signs in cleanly with the new password
+    setPasswordRecoveryPending(false);
+    clearAuthUrlParams();
+    setHasValidRecoverySession(false);
+    setPasswordRecoveryFailureReason(null);
+    setPasswordRecoveryError(null);
+    setLegacyAuthLinkNotice(null);
+
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        await client.auth.signOut();
+      } catch {
+        //
+      }
+    }
+
+    isAdminLoggedInRef.current = false;
+    setIsAdminLoggedIn(false);
+    setIsSupabaseAdminAuthed(false);
+    setSupabaseAdminEmail(null);
+    try {
+      sessionStorage.removeItem('foodhome_admin_session');
+    } catch {}
+
+    setPasswordResetSuccessNotice('비밀번호가 성공적으로 변경되었습니다. 새 비밀번호로 로그인해 주세요.');
+    showToast('비밀번호가 성공적으로 변경되었습니다. 새 비밀번호로 로그인해 주세요.');
+    return { success: true };
+  };
+
+  const finishPasswordRecoveryToLogin = () => {
+    setPasswordRecoveryPending(false);
+    clearAuthUrlParams();
+    isPasswordRecoveryModeRef.current = false;
+    setIsPasswordRecoveryMode(false);
+    setHasValidRecoverySession(false);
+    setIsCheckingRecoverySession(false);
+    setPasswordRecoveryFailureReason(null);
+    setPasswordRecoveryError(null);
+    setIsAdminOpen(true);
+  };
+
+  const cancelPasswordRecovery = async () => {
+    const hadRecoveryPending = isPasswordRecoveryPending() || hasValidRecoverySession;
+    setPasswordRecoveryPending(false);
+    clearAuthUrlParams();
+
+    // Only sign out if a temporary OTP recovery session was active and no normal admin session is open
+    if (hadRecoveryPending && !isAdminLoggedInRef.current) {
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          await client.auth.signOut();
+        } catch {}
+      }
+      setIsSupabaseAdminAuthed(false);
+      setSupabaseAdminEmail(null);
+    }
+
+    isPasswordRecoveryModeRef.current = false;
+    setIsPasswordRecoveryMode(false);
+    setHasValidRecoverySession(false);
+    setIsCheckingRecoverySession(false);
+    setPasswordRecoveryFailureReason(null);
+    setPasswordRecoveryError(null);
+    setLegacyAuthLinkNotice(null);
   };
 
   const addSamplePost = async (post: {
@@ -1107,6 +1628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         banners
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('메인 배너가 성공적으로 수정되었습니다.');
   };
 
@@ -1119,6 +1641,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         ...newConfig
       }
     }));
+    setHasUnpublishedChanges(true);
     showToast('신청서 양식 설정이 저장되었습니다.');
   };
 
@@ -1296,10 +1819,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsAdminOpen,
         isAdminLoggedIn,
         setIsAdminLoggedIn,
+        isSupabaseAdminAuthed,
+        supabaseAdminEmail,
+        isSyncingFromSupabase,
+        isPublishingToSupabase,
+        hasUnpublishedChanges,
+        setHasUnpublishedChanges,
+        lastSupabasePublishAt,
+        lastSupabaseSyncError,
+        remoteSiteContentsInfo,
+        publishPublicContentsToSupabase,
+        pullPublicContentsFromSupabase,
         handleAdminLogin,
         handleAdminLogout,
         supabaseConfig,
         updateSupabaseConfig,
+        isPasswordRecoveryMode,
+        isCheckingRecoverySession,
+        hasValidRecoverySession,
+        passwordRecoveryEmail,
+        passwordRecoveryError,
+        passwordRecoveryFailureReason,
+        passwordResetSuccessNotice,
+        legacyAuthLinkNotice,
+        clearPasswordResetSuccessNotice,
+        clearLegacyAuthLinkNotice,
+        requestPasswordResetOtp,
+        verifyPasswordResetOtp,
+        submitPasswordRecoveryUpdate,
+        finishPasswordRecoveryToLogin,
+        cancelPasswordRecovery,
         addSamplePost,
         updateSamplePostReply,
         verifyPostPassword,

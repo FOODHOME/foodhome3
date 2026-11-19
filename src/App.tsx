@@ -22,6 +22,7 @@ import { ProductDetailModal } from './components/ProductDetailModal';
 import { PostDetailModal } from './components/PostDetailModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AdminLoginModal } from './components/AdminLoginModal';
+import { PasswordRecoveryModal } from './components/PasswordRecoveryModal';
 import { CompanyAboutPage } from './components/CompanyAboutPage';
 import { ProductsPage } from './components/ProductsPage';
 import { ProductDetailPage } from './components/ProductDetailPage';
@@ -39,7 +40,8 @@ const MainContent: React.FC = () => {
     setActivePage,
     isAdminOpen, 
     setIsAdminOpen, 
-    isAdminLoggedIn
+    isAdminLoggedIn,
+    isPasswordRecoveryMode
   } = useApp();
   const { theme } = state;
 
@@ -161,7 +163,24 @@ const MainContent: React.FC = () => {
         {activePage === 'posts' && <BlogNoticeSection />}
         
         {/* Home Page Flow: Dynamic order and visibility configured via Admin MainSectionsManager */}
-        {(activePage === 'home' || !activePage) && (
+        {(!activePage ||
+          activePage === 'home' ||
+          ![
+            'about',
+            'about-intro',
+            'about-system',
+            'about-permits',
+            'about-location',
+            'products',
+            'product-detail',
+            'sample-board',
+            'sample-board-write',
+            'quote-board',
+            'quote-board-write',
+            'notice-board',
+            'faq-board',
+            'posts'
+          ].includes(activePage) && !activePage.startsWith('product:')) && (
           <>
             {mainSectionsList
               .filter(sec => sec.visible !== false)
@@ -178,13 +197,16 @@ const MainContent: React.FC = () => {
       <PostDetailModal />
 
       {/* Admin Auth Modal or Dashboard (Accessible ONLY via Footer Button) */}
-      {isAdminOpen && (
+      {!isPasswordRecoveryMode && isAdminOpen && (
         isAdminLoggedIn ? (
           <AdminDashboard />
         ) : (
           <AdminLoginModal isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} />
         )
       )}
+
+      {/* Password Recovery Screen (Shown when arriving from Supabase Auth reset email link) */}
+      <PasswordRecoveryModal />
 
       <Toast />
 
